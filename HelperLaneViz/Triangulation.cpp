@@ -14,23 +14,12 @@
 
 // Assumes vertices are the boundary of a CONVEX polygon in CCW or CW order.
 // For a general simple polygon: add a diagonal validity test in the inner loop.
-Triangulation TriangleFactory::minimumWeightTriangulationConvex(const std::vector<simd_float3>& v) {
-    const int vertexCount = (int)v.size();
+Triangulation TriangleFactory::CreateConvexMWT(const std::vector<Vertex>& vertices) {
+    const int vertexCount = int(vertices.size());
     Triangulation out;
     if (vertexCount < 3) {
         return out;
     }
-
-    // Ensure CCW for consistent winding (optional)
-    auto twiceArea = [&](){
-        double A = 0;
-        for (int i=0; i<vertexCount; i++) {
-            int j = (i + 1) % vertexCount;
-            A += v[i].x*v[j].y - v[j].x*v[i].y;
-        }
-        return A;
-    };
-    bool ccw = twiceArea() > 0;
 
     // dp and split tables
     std::vector<double> dp(vertexCount * vertexCount, 0.0);
@@ -38,7 +27,7 @@ Triangulation TriangleFactory::minimumWeightTriangulationConvex(const std::vecto
     auto DP = [&](int i,int j)->double& { return dp[i * vertexCount + j]; };
     auto SP = [&](int i,int j)->int&    { return split[i * vertexCount + j]; };
 
-    auto weight = [&](int a, int b){ return simd_distance(v[a], v[b]); };
+    auto weight = [&](int a, int b){ return simd_distance(vertices[a].position, vertices[b].position); };
 
     // Initialize
     for (int i=0; i < vertexCount - 1; i++) {
@@ -70,8 +59,7 @@ Triangulation TriangleFactory::minimumWeightTriangulationConvex(const std::vecto
         if (k < 0) return;
         // Triangle (i,k,j)
         auto pushTri = [&](int a,int b,int c){
-            if (ccw) { idx.push_back(a); idx.push_back(b); idx.push_back(c); }
-            else     { idx.push_back(a); idx.push_back(c); idx.push_back(b); }
+            idx.push_back(a); idx.push_back(b); idx.push_back(c);
         };
         pushTri(i, k, j);
         emit(i, k);

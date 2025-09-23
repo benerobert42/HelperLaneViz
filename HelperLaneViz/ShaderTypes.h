@@ -19,7 +19,6 @@ typedef enum VertexInputIndex
 typedef struct
 {
     vector_float3 position;
-    vector_float3 normal;
 } Vertex;
 
 typedef struct

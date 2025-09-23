@@ -7,6 +7,8 @@
 
 #pragma once
 
+#include "ShaderTypes.h"
+
 #include <simd/simd.h>
 #include <vector>
 
@@ -16,5 +18,5 @@ struct Triangulation {
 };
 
 namespace TriangleFactory {
-    Triangulation minimumWeightTriangulationConvex(const std::vector<simd_float3>& v);
+    Triangulation CreateConvexMWT(const std::vector<Vertex>& vertices);
 }
