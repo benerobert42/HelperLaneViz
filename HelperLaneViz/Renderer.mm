@@ -27,6 +27,8 @@
     id<MTLBuffer> _indexBuffer;
 
     vector_uint2 _viewportSize;
+
+    std::vector<uint32_t> _gridParams;
 }
 
 - (id<MTLRenderPipelineState>) createPSOWith:(nonnull MTKView*)mtkView {
@@ -70,16 +72,18 @@
         _depthState = [self createDSS];
         _commandQueue = [_device newCommandQueue];
 
-        auto vertices = GeometryFactory::CreateVerticesForCircle(100, 1.0);
-        std::vector<uint32_t> indicesMWT = TriangleFactory::CreateConvexMWT(vertices).indices;
+        auto vertices = GeometryFactory::CreateVerticesForCircle(10, 1.0);
+//        std::vector<uint32_t> indices = TriangleFactory::CreateConvexMWT(vertices);
+//        std::vector<uint32_t> indices = TriangleFactory::CreateCentralTriangulation(vertices);
+        std::vector<uint32_t> indices = TriangleFactory::CreateDelauneyTriangulation(vertices);
 
         
         _vertexBuffer = [_device newBufferWithBytes:vertices.data()
                                     length:vertices.size() * sizeof(Vertex)
                                    options:MTLResourceStorageModeShared];
 
-        _indexBuffer = [_device newBufferWithBytes:indicesMWT.data()
-                                    length:indicesMWT.size() * 4
+        _indexBuffer = [_device newBufferWithBytes:indices.data()
+                                    length:indices.size() * 4
                                    options:MTLResourceStorageModeShared];
     }
     return self;
@@ -116,7 +120,11 @@
 
         [encoder setVertexBuffer:_vertexBuffer offset:0 atIndex:0];
 
-        [encoder drawIndexedPrimitives:MTLPrimitiveTypeLineStrip
+        [encoder setVertexBytes:_gridParams.data()
+                         length:sizeof(_gridParams)
+                        atIndex:2];
+
+        [encoder drawIndexedPrimitives:MTLPrimitiveTypeTriangle
                             indexCount:_indexBuffer.length / sizeof(uint32_t)
                              indexType:MTLIndexTypeUInt32
                            indexBuffer:_indexBuffer

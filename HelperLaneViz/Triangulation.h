@@ -18,5 +18,7 @@ struct Triangulation {
 };
 
 namespace TriangleFactory {
-    Triangulation CreateConvexMWT(const std::vector<Vertex>& vertices);
+    std::vector<uint32_t> CreateConvexMWT(const std::vector<Vertex>& vertices);
+    std::vector<uint32_t> CreateCentralTriangulation(std::vector<Vertex>& vertices);
+    std::vector<uint32_t> CreateDelauneyTriangulation(std::vector<Vertex>& vertices);
 }
