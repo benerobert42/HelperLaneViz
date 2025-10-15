@@ -254,3 +254,80 @@ std::vector<uint32_t> TriangleFactory::CreateDelauneyTriangulation(std::vector<V
     }
     return out;
 }
+
+std::vector<uint32_t> TriangleFactory::CreateMaxAreaTriangulation(const std::vector<Vertex>& vertices)
+{
+    std::vector<uint32_t> triangleIndices;
+    const size_t n = vertices.size();
+    if (n < 3) return triangleIndices;
+
+    // Helper: triangle area (absolute), using Vertex.x / Vertex.y
+    auto triArea = [&](uint32_t ia, uint32_t ib, uint32_t ic) -> double {
+        const auto& A = vertices[ia]; const auto& B = vertices[ib]; const auto& C = vertices[ic];
+        const double ax = double(A.position.x), ay = double(A.position.y);
+        const double bx = double(B.position.x), by = double(B.position.y);
+        const double cx = double(C.position.x), cy = double(C.position.y);
+        return std::abs((bx - ax) * (cy - ay) - (by - ay) * (cx - ax)) * 0.5;
+    };
+
+    // Recursive greedy splitter: for the current convex polygon (as indices into 'vertices'),
+    // find the globally largest-area triangle (any triple), emit it, split along its edges,
+    // and recurse on the resulting convex sub-polygons.
+    std::function<void(const std::vector<uint32_t>&)> solve =
+    [&](const std::vector<uint32_t>& poly)
+    {
+        const size_t m = poly.size();
+        if (m < 3) return;
+        if (m == 3) {
+            triangleIndices.insert(triangleIndices.end(), { poly[0], poly[1], poly[2] });
+            return;
+        }
+
+        // 1) Find the largest-area triangle among all triples in this polygon (i < j < k in ring order).
+        double bestArea = -1.0;
+        size_t bi = 0, bj = 1, bk = 2;
+        for (size_t i = 0; i + 2 < m; ++i) {
+            for (size_t j = i + 1; j + 1 < m; ++j) {
+                for (size_t k = j + 1; k < m; ++k) {
+                    const double area = triArea(poly[i], poly[j], poly[k]);
+                    if (area > bestArea) { bestArea = area; bi = i; bj = j; bk = k; }
+                }
+            }
+        }
+
+        // Emit the chosen triangle (A,B,C).
+        const uint32_t A = poly[bi], B = poly[bj], C = poly[bk];
+        triangleIndices.insert(triangleIndices.end(), { A, B, C });
+
+        // 2) Split the polygon along the edges (A,B), (B,C), (C,A) into up to three sub-polygons.
+        // Each sub-polygon is the boundary arc between those vertices, inclusive of endpoints.
+        auto makeArc = [&](size_t start, size_t endInclusive) -> std::vector<uint32_t> {
+            std::vector<uint32_t> sub;
+            if (start <= endInclusive) {
+                sub.insert(sub.end(), poly.begin() + ptrdiff_t(start), poly.begin() + ptrdiff_t(endInclusive + 1));
+            } else {
+                sub.insert(sub.end(), poly.begin() + ptrdiff_t(start), poly.end());
+                sub.insert(sub.end(), poly.begin(),               poly.begin() + ptrdiff_t(endInclusive + 1));
+            }
+            return sub;
+        };
+
+        // Indices bi,bj,bk are in increasing order on the ring by construction.
+        const auto subAB = makeArc(bi, bj);
+        const auto subBC = makeArc(bj, bk);
+        const auto subCA = makeArc(bk, bi);
+
+        // 3) Recurse on any sub-polygon that still has 3+ vertices (a triangle or larger).
+        if (subAB.size() >= 3) solve(subAB);
+        if (subBC.size() >= 3) solve(subBC);
+        if (subCA.size() >= 3) solve(subCA);
+    };
+
+    // Start with the full polygon as indices [0..n-1] in circular order.
+    std::vector<uint32_t> full(n);
+    for (uint32_t i = 0; i < n; ++i) full[i] = i;
+
+    triangleIndices.reserve((n - 2) * 3);
+    solve(full);
+    return triangleIndices;
+}

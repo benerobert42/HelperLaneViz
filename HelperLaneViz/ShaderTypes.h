@@ -27,4 +27,11 @@ typedef struct
     simd_uint2 viewPortSize;
 } FrameConstants;
 
+struct GridParams {
+    uint32_t cols;
+    uint32_t rows;
+    simd_float2 cellSize; // world units or NDC scale
+    simd_float2 origin; // bottom-left in world/NDC
+    float scale; // optional uniform scale
+};
 #endif

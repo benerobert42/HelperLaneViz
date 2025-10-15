@@ -13,6 +13,7 @@
 #import "ShaderTypes.h"
 #import "Triangulation.h"
 #import "GeometryFactory.h"
+#import "SVGLoader.h"
 
 #import <iostream>
 
@@ -26,9 +27,11 @@
     id<MTLBuffer> _vertexBuffer;
     id<MTLBuffer> _indexBuffer;
 
+    id<MTLBuffer> _counterBuffer;
+
     vector_uint2 _viewportSize;
 
-    std::vector<uint32_t> _gridParams;
+    GridParams _gridParams;
 }
 
 - (id<MTLRenderPipelineState>) createPSOWith:(nonnull MTKView*)mtkView {
@@ -72,12 +75,24 @@
         _depthState = [self createDSS];
         _commandQueue = [_device newCommandQueue];
 
-        auto vertices = GeometryFactory::CreateVerticesForCircle(10, 1.0);
-//        std::vector<uint32_t> indices = TriangleFactory::CreateConvexMWT(vertices);
-//        std::vector<uint32_t> indices = TriangleFactory::CreateCentralTriangulation(vertices);
-        std::vector<uint32_t> indices = TriangleFactory::CreateDelauneyTriangulation(vertices);
+        std::vector<Vertex> vertices;
+        std::vector<uint32_t> indicesUnused;
+        SVGLoader::TessellateSvgToMesh("/Users/robi/Downloads/drip-coffee-maker.svg", vertices, indicesUnused);
 
-        
+//        auto vertices = GeometryFactory::CreateVerticesForCircle(3000, 0.015);
+        std::vector<uint32_t> indices = TriangleFactory::CreateConvexMWT(vertices);
+//        std::vector<uint32_t> indices = TriangleFactory::CreateCentralTriangulation(vertices);
+//        std::vector<uint32_t> indices = TriangleFactory::CreateDelauneyTriangulation(vertices);
+//        std::vector<uint32_t> indices = TriangleFactory::CreateMaxAreaTriangulation(vertices);
+
+        _gridParams = {
+            .cols = 1,
+            .rows = 1,
+            .cellSize = {2.0 / 1, 2.0 / 1},
+            .origin = {-0.99, -0.99},
+            .scale = 1.0
+        };
+
         _vertexBuffer = [_device newBufferWithBytes:vertices.data()
                                     length:vertices.size() * sizeof(Vertex)
                                    options:MTLResourceStorageModeShared];
@@ -85,6 +100,9 @@
         _indexBuffer = [_device newBufferWithBytes:indices.data()
                                     length:indices.size() * 4
                                    options:MTLResourceStorageModeShared];
+
+        MTLResourceOptions opts = MTLResourceStorageModeManaged;
+        _counterBuffer = [_device newBufferWithLength:sizeof(uint32_t) options:opts];
     }
     return self;
 }
@@ -101,9 +119,15 @@
 {
     id<MTLCommandBuffer> commandBuffer = [_commandQueue commandBuffer];
 
+    *reinterpret_cast<uint32_t *>(_counterBuffer.contents) = 0;
+    if (_counterBuffer.storageMode == MTLStorageModeManaged) {
+        id<MTLBlitCommandEncoder> blit = [commandBuffer blitCommandEncoder];
+        [blit synchronizeResource:_counterBuffer]; // make CPU write visible to GPU
+        [blit endEncoding];
+    }
+
     MTLRenderPassDescriptor *renderPassDescriptor = view.currentRenderPassDescriptor;
-    if(renderPassDescriptor != nil)
-    {
+    if(renderPassDescriptor != nil) {
         id<MTLRenderCommandEncoder> encoder =
         [commandBuffer renderCommandEncoderWithDescriptor:renderPassDescriptor];
 
@@ -114,13 +138,18 @@
             .viewProjectionMatrix = matrix_identity_float4x4,
             .viewPortSize = _viewportSize
         };
+
+        [encoder setFragmentBuffer:_counterBuffer
+                           offset:0
+                          atIndex:0];
+
         [encoder setVertexBytes:&frameConstants
                          length:sizeof(frameConstants)
                         atIndex:VertexInputIndexFrameConstants];
 
         [encoder setVertexBuffer:_vertexBuffer offset:0 atIndex:0];
 
-        [encoder setVertexBytes:_gridParams.data()
+        [encoder setVertexBytes:&_gridParams
                          length:sizeof(_gridParams)
                         atIndex:2];
 
@@ -128,9 +157,20 @@
                             indexCount:_indexBuffer.length / sizeof(uint32_t)
                              indexType:MTLIndexTypeUInt32
                            indexBuffer:_indexBuffer
-                     indexBufferOffset:0];
+                     indexBufferOffset:0
+                         instanceCount:1];
 
         [encoder endEncoding];
+
+        id<MTLBlitCommandEncoder> blit = [commandBuffer blitCommandEncoder];
+        [blit synchronizeResource:_counterBuffer];
+        [blit endEncoding];
+
+        [commandBuffer addCompletedHandler:^(id<MTLCommandBuffer> _Nonnull) {
+            const uint32_t total = *reinterpret_cast<const uint32_t *>(self->_counterBuffer.contents);
+            printf("Total helper fragments this frame: %u\n", total);
+        }];
+
         [commandBuffer presentDrawable:view.currentDrawable];
     }
     [commandBuffer commit];

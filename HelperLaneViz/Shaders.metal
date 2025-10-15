@@ -15,25 +15,33 @@ struct RasterizerData {
     float3 normal;
 };
 
+struct HelperCounter {
+    atomic_uint helpers;
+};
+
 vertex RasterizerData
 vertexShader(uint vertexID [[ vertex_id ]],
+             uint instanceID [[instance_id]],
              const device Vertex* vertices [[ buffer(VertexInputIndexVertices) ]],
-             constant FrameConstants &frameConstants [[ buffer(VertexInputIndexFrameConstants) ]])
+             constant FrameConstants &frameConstants [[ buffer(VertexInputIndexFrameConstants) ]],
+             constant GridParams& gridParams [[ buffer(2) ]])
 {
     RasterizerData out;
 
-//    float2 pixelPosition = float2(vertices[vertexID].position.xy);
-//    const vector_float2 floatViewport = vector_float2(viewportSize);
-//
-//    const vector_float2 topDownClipSpacePosition =
-//        (pixelPosition / (floatViewport / 2.0)) - 1.0;
+    uint col = instanceID % gridParams.cols;
+    uint row = instanceID / gridParams.cols;
 
-    float3 position = vertices[vertexID].position;
-    out.position = frameConstants.viewProjectionMatrix * float4(position.x, position.y, position.z, 1.0);
+    float2 base = float2(col, row) * gridParams.cellSize + gridParams.origin;
+    float2 p2 = base + vertices[vertexID].position.xy * gridParams.scale;
+
+    // assume positions are in NDC already or pre-mapped; otherwise apply a proj*view.
+    float4 position = float4(p2, vertices[vertexID].position.z, 1.0);;
+    out.position = frameConstants.viewProjectionMatrix * position;
     return out;
 }
 
-fragment float4 fragmentShader(RasterizerData in [[stage_in]])
+fragment float4 fragmentShader(RasterizerData in [[stage_in]],
+                               device HelperCounter* counter [[buffer(0)]])
 {
     int h = simd_is_helper_thread() ? 1 : 0;
 
@@ -50,6 +58,8 @@ fragment float4 fragmentShader(RasterizerData in [[stage_in]])
         float4(1.0, 0.5, 0.1, 1.0),  // 2 helpers → orange
         float4(1.0, 0.0, 0.0, 1.0)   // 3 helpers → red
     };
+
+    atomic_fetch_add_explicit(&counter->helpers, sum, memory_order_relaxed);
 
     return colors[sum];
 }
