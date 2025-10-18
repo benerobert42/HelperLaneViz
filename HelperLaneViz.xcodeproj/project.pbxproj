@@ -393,6 +393,11 @@
 				COMBINE_HIDPI_IMAGES = YES;
 				CURRENT_PROJECT_VERSION = 1;
 				GENERATE_INFOPLIST_FILE = YES;
+				HEADER_SEARCH_PATHS = (
+					"$(SRCROOT)/external/libigl/include",
+					"$(SRCROOT)/external/eigen",
+					"$(SRCROOT)/external/triangle",
+				);
 				INFOPLIST_KEY_NSHumanReadableCopyright = "";
 				INFOPLIST_KEY_NSMainStoryboardFile = Main;
 				INFOPLIST_KEY_NSPrincipalClass = NSApplication;
@@ -401,6 +406,11 @@
 					"@executable_path/../Frameworks",
 				);
 				MARKETING_VERSION = 1.0;
+				OTHER_CFLAGS = (
+					"-DTRILIBRARY",
+					"-DNO_TIMER",
+					"-DANSI_DECLARATORS",
+				);
 				PRODUCT_BUNDLE_IDENTIFIER = Me.HelperLaneViz;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SWIFT_EMIT_LOC_STRINGS = YES;
@@ -417,6 +427,11 @@
 				COMBINE_HIDPI_IMAGES = YES;
 				CURRENT_PROJECT_VERSION = 1;
 				GENERATE_INFOPLIST_FILE = YES;
+				HEADER_SEARCH_PATHS = (
+					"$(SRCROOT)/external/libigl/include",
+					"$(SRCROOT)/external/eigen",
+					"$(SRCROOT)/external/triangle",
+				);
 				INFOPLIST_KEY_NSHumanReadableCopyright = "";
 				INFOPLIST_KEY_NSMainStoryboardFile = Main;
 				INFOPLIST_KEY_NSPrincipalClass = NSApplication;
@@ -425,6 +440,11 @@
 					"@executable_path/../Frameworks",
 				);
 				MARKETING_VERSION = 1.0;
+				OTHER_CFLAGS = (
+					"-DTRILIBRARY",
+					"-DNO_TIMER",
+					"-DANSI_DECLARATORS",
+				);
 				PRODUCT_BUNDLE_IDENTIFIER = Me.HelperLaneViz;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SWIFT_EMIT_LOC_STRINGS = YES;

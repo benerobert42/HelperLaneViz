@@ -14,8 +14,14 @@
 #include <numeric>
 #include <random>
 
+#include <Eigen/Core>
+#include <igl/triangle/triangulate.h>
+
 // Assumes vertices are the boundary of a convex polygon
-std::vector<uint32_t> TriangleFactory::CreateConvexMWT(const std::vector<Vertex>& vertices) {
+std::vector<uint32_t> TriangleFactory::CreateConvexMWT(const std::vector<Vertex>& vertices,
+                                                       double& cumulatedEdgeLength) {
+    cumulatedEdgeLength = 0.0;
+
     const int vertexCount = int(vertices.size());
     std::vector<uint32_t> out;
     float totalCost = 0;
@@ -23,6 +29,16 @@ std::vector<uint32_t> TriangleFactory::CreateConvexMWT(const std::vector<Vertex>
     if (vertexCount < 3) {
         return out;
     }
+
+    auto triPerimeter = [&](uint32_t ia, uint32_t ib, uint32_t ic) -> double {
+        auto L = [&](uint32_t p, uint32_t q) {
+            const auto& P = vertices[p]; const auto& Q = vertices[q];
+            const double dx = double(Q.position.x) - double(P.position.x);
+            const double dy = double(Q.position.y) - double(P.position.y);
+            return std::sqrt(dx*dx + dy*dy);
+        };
+        return L(ia, ib) + L(ib, ic) + L(ic, ia);
+    };
 
     std::vector<double> dp(vertexCount * vertexCount, 0.0);
     std::vector<int> split(vertexCount * vertexCount, -1);
@@ -62,6 +78,9 @@ std::vector<uint32_t> TriangleFactory::CreateConvexMWT(const std::vector<Vertex>
         // Triangle (i,k,j)
         auto pushTri = [&](int a,int b,int c){
             idx.push_back(a); idx.push_back(b); idx.push_back(c);
+            cumulatedEdgeLength += triPerimeter(static_cast<uint32_t>(a),
+                                                static_cast<uint32_t>(b),
+                                                static_cast<uint32_t>(c));
         };
         pushTri(i, k, j);
         emit(i, k);
@@ -101,11 +120,14 @@ std::vector<uint32_t> TriangleFactory::CreateCentralTriangulation(std::vector<Ve
     return indices;
 }
 
-std::vector<uint32_t> TriangleFactory::CreateDelauneyTriangulation(std::vector<Vertex>& vertices) {
+std::vector<uint32_t>
+TriangleFactory::CreateDelauneyTriangulation(std::vector<Vertex>& vertices)
+{
     auto circumcircleContainsStrict = [&](const simd_float2& a,
                                           const simd_float2& b,
                                           const simd_float2& c,
-                                          const simd_float2& p) -> bool {
+                                          const simd_float2& p) -> bool
+    {
         float A = b.x - a.x;
         float B = b.y - a.y;
         float C = c.x - a.x;
@@ -114,149 +136,138 @@ std::vector<uint32_t> TriangleFactory::CreateDelauneyTriangulation(std::vector<V
         float F = C*(a.x+c.x) + D*(a.y+c.y);
         float G = 2.f*(A*(c.y-b.y) - B*(c.x-b.x));
 
-        if (std::fabs(G) < 1e-12f) {
-            return false; // collinear
-        }
+        if (std::fabs(G) < 1e-12f) return false; // collinear
 
-        simd_float2 center{(D * E - B * F) / G, (A * F - C * E) / G};
-        return simd_distance_squared(center, p) < simd_distance_squared(center, a); // equality not allowed
+        simd_float2 center{ (D*E - B*F) / G, (A*F - C*E) / G };
+        float r2 = simd_distance_squared(center, a);
+        float d2 = simd_distance_squared(center, p);
+        return d2 < r2; // strict
     };
 
-    struct Triangle {
-        uint32_t a;
-        uint32_t b;
-        uint32_t c;
-    };
+    struct Triangle { uint32_t a,b,c; };
 
     struct Edge {
-        uint32_t u;
-        uint32_t v;
-
-        Edge(uint32_t a, uint32_t b) {
-            if (a < b) {
-                u = a;
-                v = b;
-            } else {
-                u = b;
-                v = a;
-            }
-        } // canonicalize (min,max)
-
-        bool operator<(const Edge& other) const {
-            return (u < other.u) || (u == other.u && v < other.v);
+        uint32_t u,v;
+        Edge(uint32_t a, uint32_t b) { // canonical (min,max)
+            if (a < b) { u=a; v=b; } else { u=b; v=a; }
+        }
+        bool operator<(const Edge& o) const {
+            return (u < o.u) || (u == o.u && v < o.v);
         }
     };
 
     const uint32_t vertexCount = static_cast<uint32_t>(vertices.size());
     std::vector<uint32_t> out;
-    if (vertexCount < 3) {
-        return out;
-    }
+    if (vertexCount < 3) return out;
 
+    // Gather 2D points
     std::vector<simd_float2> points;
-    points.reserve(vertexCount+3);
-    for (const auto& vertex: vertices) {
-        points.push_back(simd_make_float2(vertex.position.x, vertex.position.y));
-    }
+    points.reserve(vertexCount + 3);
+    for (const auto& v : vertices)
+        points.push_back(simd_make_float2(v.position.x, v.position.y));
 
-    // (optional) randomized insertion order for robustness on circles
+    // Randomized insertion order (robustness)
     std::vector<uint32_t> order(vertexCount);
     std::iota(order.begin(), order.end(), 0);
-    std::mt19937 rng{12345}; std::shuffle(order.begin(), order.end(), rng);
+    std::mt19937 rng{12345};
+    std::shuffle(order.begin(), order.end(), rng);
 
-    float minx =+ INFINITY;
-    float miny =+ INFINITY;
-    float maxx =- INFINITY;
-    float maxy =- INFINITY;
-
-    for (const auto& point: points) {
-        minx = std::min(minx,point.x);
-        miny = std::min(miny,point.y);
-        maxx = std::max(maxx,point.x);
-        maxy = std::max(maxy,point.y);
+    // Bounding box
+    float minx = +INFINITY, miny = +INFINITY;
+    float maxx = -INFINITY, maxy = -INFINITY;
+    for (const auto& p : points) {
+        minx = std::min(minx, p.x); miny = std::min(miny, p.y);
+        maxx = std::max(maxx, p.x); maxy = std::max(maxy, p.y);
     }
-    float d = std::max(maxx - minx, maxy - miny) * 10.f + 1.f;
-    simd_float2 s0{minx - 1.f, miny - 1.f - d};
-    simd_float2 s1{minx - 1.f - d, maxy + 1.f};
-    simd_float2 s2{maxx + 1.f + d, maxy + 1.f};
-    uint32_t i0 = (uint32_t)points.size();
-    points.push_back(s0);
-    uint32_t i1 = (uint32_t)points.size();
-    points.push_back(s1);
-    uint32_t i2 = (uint32_t)points.size();
-    points.push_back(s2);
+
+    // FIX: build a robust super-triangle that surely encloses all points
+    // Use a big triangle centered at bbox center.
+    const float cx = 0.5f*(minx + maxx), cy = 0.5f*(miny + maxy);
+    const float r  = std::max(maxx - minx, maxy - miny) * 10.f + 1.f; // radius margin
+
+    simd_float2 s0{ cx - 2.f*r, cy - r };
+    simd_float2 s1{ cx,         cy + 2.f*r };
+    simd_float2 s2{ cx + 2.f*r, cy - r };
+
+    uint32_t i0 = (uint32_t)points.size(); points.push_back(s0);
+    uint32_t i1 = (uint32_t)points.size(); points.push_back(s1);
+    uint32_t i2 = (uint32_t)points.size(); points.push_back(s2);
 
     std::vector<Triangle> triangles;
     triangles.push_back({i0,i1,i2});
 
     auto ccw = [&](uint32_t a, uint32_t b, uint32_t c){
-        simd_float2 p=points[a];
-        simd_float2 q = points[b];
-        simd_float2 r = points[c];
-        return (q.x - p.x) * (r.y - p.y) - (q.y - p.y) * (r.x - p.x) >= 0.f;
+        const simd_float2 &p = points[a], &q = points[b], &r2 = points[c];
+        return (q.x - p.x)*(r2.y - p.y) - (q.y - p.y)*(r2.x - p.x) > 0.f;
     };
 
+    // Incremental Bowyer–Watson
     for (uint32_t k = 0; k < vertexCount; ++k) {
-        uint32_t pointIdx = order[k];
-        const simd_float2& point = points[pointIdx];
+        uint32_t pi = order[k];
+        const simd_float2& P = points[pi];
 
         std::vector<int> bad;
+        bad.reserve(triangles.size());
         std::map<Edge,int> border;
 
-        for (int triangleIdx = 0; triangleIdx < int(triangles.size()); ++triangleIdx) {
-            const auto& triangle = triangles[triangleIdx];
-            if (circumcircleContainsStrict(points[triangle.a],
-                                           points[triangle.b],
-                                           points[triangle.c],
-                                           point)) {
-                bad.push_back(triangleIdx);
-                border[Edge(triangle.a, triangle.b)]++;
-                border[Edge(triangle.b, triangle.c)]++;
-                border[Edge(triangle.c, triangle.a)]++;
+        // Find all triangles whose circumcircle strictly contains P
+        for (int t = 0; t < (int)triangles.size(); ++t) {
+            const auto& T = triangles[t];
+            if (circumcircleContainsStrict(points[T.a], points[T.b], points[T.c], P)) {
+                bad.push_back(t);
+                // Collect edges of the cavity boundary (count occurrences)
+                border[Edge(T.a,T.b)]++;
+                border[Edge(T.b,T.c)]++;
+                border[Edge(T.c,T.a)]++;
             }
         }
 
+        // FIX: remove "bad" triangles (sort first, then skip-copy)
+        std::sort(bad.begin(), bad.end()); // FIX
         if (!bad.empty()) {
             std::vector<Triangle> kept;
             kept.reserve(triangles.size() - bad.size());
             int bi = 0;
-            for (int triangleIdx = 0; triangleIdx < int(triangles.size()); ++triangleIdx) {
-                if (bi < (int)bad.size() && triangleIdx == bad[bi]) { ++bi; continue; }
-                kept.push_back(triangles[triangleIdx]);
+            for (int t = 0; t < (int)triangles.size(); ++t) {
+                if (bi < (int)bad.size() && t == bad[bi]) { ++bi; continue; }
+                kept.push_back(triangles[t]);
             }
             triangles.swap(kept);
         }
 
-        for (auto &[edge, occurrence] : border) {
-            if (occurrence == 1) {
-                uint32_t a = edge.u;
-                uint32_t b = edge.v;
-                // enforce consistent winding (CCW) with the new point
-                if (!ccw(a, b, pointIdx)) {
-                    std::swap(a,b);
-                }
-                triangles.push_back({a, b, pointIdx});
-            }
+        // Re-triangulate the cavity boundary with fan to P (only edges seen once)
+        for (const auto& kv : border) {
+            if (kv.second != 1) continue;  // interior edges appear twice
+            uint32_t a = kv.first.u, b = kv.first.v;
+            // enforce CCW with the new point
+            if (!ccw(a,b,pi)) std::swap(a,b);
+            triangles.push_back({a,b,pi});
         }
 
-        out.reserve(triangles.size()*3);
-        for (auto& triangle : triangles) {
-            if (triangle.a >= vertexCount || triangle.b >= vertexCount || triangle.c >= vertexCount) { continue;  // drop super-triangle
-            }
-            // final CCW if needed by your pipeline
-            if (!ccw(triangle.a, triangle.b, triangle.c)) {
-                std::swap(triangle.b, triangle.c);
-            }
-            out.push_back(triangle.a);
-            out.push_back(triangle.b);
-            out.push_back(triangle.c);
-        }
+        // FIX: DO NOT append to 'out' inside the loop.
+        // Output is generated once after all insertions are complete.
     }
+
+    // FIX: build final output once, excluding any triangle touching the super-triangle
+    out.clear(); // FIX
+    out.reserve(triangles.size() * 3);
+    for (auto T : triangles) {
+        if (T.a >= vertexCount || T.b >= vertexCount || T.c >= vertexCount)
+            continue; // drop super-triangle connections
+        // final CCW
+        if (!ccw(T.a, T.b, T.c)) std::swap(T.b, T.c);
+        out.push_back(T.a);
+        out.push_back(T.b);
+        out.push_back(T.c);
+    }
+
     return out;
 }
 
-std::vector<uint32_t> TriangleFactory::CreateMaxAreaTriangulation(const std::vector<Vertex>& vertices)
+std::vector<uint32_t> TriangleFactory::CreateMaxAreaTriangulation(const std::vector<Vertex>& vertices,
+                                                                  double& cumulatedEdgeLength)
 {
+    cumulatedEdgeLength = 0.0;
     std::vector<uint32_t> triangleIndices;
     const size_t n = vertices.size();
     if (n < 3) return triangleIndices;
@@ -270,6 +281,16 @@ std::vector<uint32_t> TriangleFactory::CreateMaxAreaTriangulation(const std::vec
         return std::abs((bx - ax) * (cy - ay) - (by - ay) * (cx - ax)) * 0.5;
     };
 
+    auto triPerimeter = [&](uint32_t ia, uint32_t ib, uint32_t ic) -> double {
+        auto L = [&](uint32_t p, uint32_t q) {
+            const auto& P = vertices[p]; const auto& Q = vertices[q];
+            const double dx = double(Q.position.x) - double(P.position.x);
+            const double dy = double(Q.position.y) - double(P.position.y);
+            return std::sqrt(dx*dx + dy*dy);
+        };
+        return L(ia, ib) + L(ib, ic) + L(ic, ia);
+    };
+
     // Recursive greedy splitter: for the current convex polygon (as indices into 'vertices'),
     // find the globally largest-area triangle (any triple), emit it, split along its edges,
     // and recurse on the resulting convex sub-polygons.
@@ -279,6 +300,7 @@ std::vector<uint32_t> TriangleFactory::CreateMaxAreaTriangulation(const std::vec
         const size_t m = poly.size();
         if (m < 3) return;
         if (m == 3) {
+            cumulatedEdgeLength += triPerimeter(poly[0], poly[1], poly[2]);
             triangleIndices.insert(triangleIndices.end(), { poly[0], poly[1], poly[2] });
             return;
         }
@@ -297,6 +319,9 @@ std::vector<uint32_t> TriangleFactory::CreateMaxAreaTriangulation(const std::vec
 
         // Emit the chosen triangle (A,B,C).
         const uint32_t A = poly[bi], B = poly[bj], C = poly[bk];
+
+        cumulatedEdgeLength += triPerimeter(A, B, C);
+
         triangleIndices.insert(triangleIndices.end(), { A, B, C });
 
         // 2) Split the polygon along the edges (A,B), (B,C), (C,A) into up to three sub-polygons.
@@ -330,4 +355,259 @@ std::vector<uint32_t> TriangleFactory::CreateMaxAreaTriangulation(const std::vec
     triangleIndices.reserve((n - 2) * 3);
     solve(full);
     return triangleIndices;
+}
+
+std::vector<uint32_t> TriangleFactory::CreateStripTriangulation(const std::vector<Vertex>& vertices)
+{
+    std::vector<uint32_t> indices;
+    const size_t n = vertices.size();
+    if (n < 3) return indices;
+
+    auto signedArea = [&]() -> double {
+        double A = 0.0;
+        for (size_t i = 0; i < n; ++i) {
+            const auto& p = vertices[i].position;
+            const auto& q = vertices[(i + 1) % n].position;
+            A += double(p.x) * double(q.y) - double(p.y) * double(q.x);
+        }
+        return 0.5 * A;
+    };
+    const bool isCW = signedArea() < 0.0;
+
+    std::vector<uint32_t> stripOrder;
+    stripOrder.reserve(n);
+    uint32_t L = 0, R = static_cast<uint32_t>(n - 1);
+    while (L <= R) {
+        stripOrder.push_back(L++);
+        if (L > R) break;
+        stripOrder.push_back(R--);
+    }
+
+    indices.reserve((n - 2) * 3);
+    for (size_t k = 0; k + 2 < stripOrder.size(); ++k) {
+        uint32_t a = stripOrder[k + 0];
+        uint32_t b = stripOrder[k + 1];
+        uint32_t c = stripOrder[k + 2];
+
+        const bool swapAB = isCW ? ((k % 2) == 0) : ((k % 2) == 1);
+        if (swapAB) std::swap(a, b);
+
+        indices.push_back(a);
+        indices.push_back(b);
+        indices.push_back(c);
+    }
+
+    return indices;
+}
+
+std::vector<uint32_t>
+TriangleFactory::CreateConvexMaxMinAreaTriangulation(const std::vector<Vertex>& vertices,
+                                                     double& cumulatedEdgeLength)
+{
+    cumulatedEdgeLength = 0.0;
+
+    const int n = (int)vertices.size();
+    std::vector<uint32_t> out;
+    if (n < 3) return out;
+
+    // --- Helpers (same as above)
+    auto signedAreaRing = [&]() -> double {
+        double A = 0.0;
+        for (int i = 0; i < n; ++i) {
+            const auto& p = vertices[i].position;
+            const auto& q = vertices[(i + 1) % n].position;
+            A += double(p.x) * double(q.y) - double(p.y) * double(q.x);
+        }
+        return 0.5 * A;
+    };
+    auto areaTri = [&](int ia, int ib, int ic) -> double {
+        const auto &A = vertices[ia].position, &B = vertices[ib].position, &C = vertices[ic].position;
+        return std::abs((double(B.x)-A.x)*(double(C.y)-A.y) - (double(B.y)-A.y)*(double(C.x)-A.x)) * 0.5;
+    };
+    auto periTri = [&](uint32_t ia, uint32_t ib, uint32_t ic) -> double {
+        auto L = [&](uint32_t p, uint32_t q){
+            const auto &P = vertices[p].position, &Q = vertices[q].position;
+            const double dx = double(Q.x) - double(P.x), dy = double(Q.y) - double(P.y);
+            return std::sqrt(dx*dx + dy*dy);
+        };
+        return L(ia,ib) + L(ib,ic) + L(ic,ia);
+    };
+    auto orientCCW = [&](uint32_t a, uint32_t b, uint32_t c) -> bool {
+        const auto &A = vertices[a].position, &B = vertices[b].position, &C = vertices[c].position;
+        const double v = (double(B.x)-A.x)*(double(C.y)-A.y) - (double(B.y)-A.y)*(double(C.x)-A.x);
+        return v > 0.0;
+    };
+
+    // CCW traversal via permutation
+    std::vector<uint32_t> order(n);
+    if (signedAreaRing() >= 0.0) {
+        for (int i = 0; i < n; ++i) order[i] = (uint32_t)i;
+    } else {
+        for (int i = 0; i < n; ++i) order[i] = (uint32_t)(n - 1 - i);
+    }
+
+    // DP[i][j] = maximal achievable minimum triangle area on chain (i..j)
+    std::vector<double> dp(n * n, 0.0);
+    std::vector<int>    split(n * n, -1);
+    auto DP = [&](int i,int j)->double& { return dp[i * n + j]; };
+    auto SP = [&](int i,int j)->int&    { return split[i * n + j]; };
+
+    // For segments (no triangle), the "minimum over an empty set" should be +INF
+    const double INF = std::numeric_limits<double>::infinity();
+    for (int i = 0; i + 1 < n; ++i) DP(i, i + 1) = INF;
+
+    for (int len = 2; len < n; ++len) {
+        for (int i = 0; i + len < n; ++i) {
+            const int j = i + len;
+            double best = 0.0;
+            int bestK = -1;
+            for (int k = i + 1; k < j; ++k) {
+                const int a = (int)order[i], b = (int)order[k], c = (int)order[j];
+                const double triA = areaTri(a, b, c);
+                // Bottleneck = min of { left, right, this triangle }
+                const double bottleneck = std::min({ DP(i,k), DP(k,j), triA });
+                if (bottleneck > best) { best = bottleneck; bestK = k; }
+            }
+            DP(i,j) = best; SP(i,j) = bestK;
+        }
+    }
+
+    // Reconstruct; emit CCW triangles in original index space
+    std::vector<uint32_t> indices;
+    indices.reserve(3 * (n - 2));
+    std::function<void(int,int)> emit = [&](int i,int j){
+        int k = SP(i,j); if (k < 0) return;
+        uint32_t a = order[i], b = order[k], c = order[j];
+        if (!orientCCW(a,b,c)) std::swap(b,c);
+        indices.push_back(a); indices.push_back(b); indices.push_back(c);
+        cumulatedEdgeLength += periTri(a,b,c);
+        emit(i,k);
+        emit(k,j);
+    };
+    emit(0, n - 1);
+
+    out = std::move(indices);
+    return out;
+}
+
+std::vector<uint32_t>
+TriangleFactory::CreateConvexMinMaxAreaTriangulation(const std::vector<Vertex>& vertices,
+                                                     double& cumulatedEdgeLength)
+{
+    cumulatedEdgeLength = 0.0;
+
+    const int n = (int)vertices.size();
+    std::vector<uint32_t> out;
+    if (n < 3) return out;
+
+    // --- Helpers
+    auto signedAreaRing = [&]() -> double {
+        double A = 0.0;
+        for (int i = 0; i < n; ++i) {
+            const auto& p = vertices[i].position;
+            const auto& q = vertices[(i + 1) % n].position;
+            A += double(p.x) * double(q.y) - double(p.y) * double(q.x);
+        }
+        return 0.5 * A;
+    };
+    auto areaTri = [&](int ia, int ib, int ic) -> double {
+        const auto &A = vertices[ia].position, &B = vertices[ib].position, &C = vertices[ic].position;
+        return std::abs((double(B.x)-A.x)*(double(C.y)-A.y) - (double(B.y)-A.y)*(double(C.x)-A.x)) * 0.5;
+    };
+    auto periTri = [&](uint32_t ia, uint32_t ib, uint32_t ic) -> double {
+        auto L = [&](uint32_t p, uint32_t q){
+            const auto &P = vertices[p].position, &Q = vertices[q].position;
+            const double dx = double(Q.x) - double(P.x), dy = double(Q.y) - double(P.y);
+            return std::sqrt(dx*dx + dy*dy);
+        };
+        return L(ia,ib) + L(ib,ic) + L(ic,ia);
+    };
+    auto orientCCW = [&](uint32_t a, uint32_t b, uint32_t c) -> bool {
+        const auto &A = vertices[a].position, &B = vertices[b].position, &C = vertices[c].position;
+        const double v = (double(B.x)-A.x)*(double(C.y)-A.y) - (double(B.y)-A.y)*(double(C.x)-A.x);
+        return v > 0.0;
+    };
+
+    // --- Ensure we traverse CCW without touching the input array
+    // If input is CW, we’ll use an index permutation “order” that reverses it.
+    std::vector<uint32_t> order(n);
+    if (signedAreaRing() >= 0.0) {
+        for (int i = 0; i < n; ++i) order[i] = (uint32_t)i;             // CCW ring
+    } else {
+        for (int i = 0; i < n; ++i) order[i] = (uint32_t)(n - 1 - i);   // CW -> reversed to CCW
+    }
+
+    // DP over chain [0..n-1] in this CCW order; store splits in DP space.
+    std::vector<double> dp(n * n, 0.0);
+    std::vector<int>    split(n * n, -1);
+    auto DP = [&](int i,int j)->double& { return dp[i * n + j]; };
+    auto SP = [&](int i,int j)->int&    { return split[i * n + j]; };
+
+    for (int i = 0; i + 1 < n; ++i) DP(i, i + 1) = 0.0;
+
+    for (int len = 2; len < n; ++len) {
+        for (int i = 0; i + len < n; ++i) {
+            const int j = i + len;
+            double best = std::numeric_limits<double>::infinity();
+            int bestK = -1;
+            for (int k = i + 1; k < j; ++k) {
+                // Map chain indices to original vertex indices
+                const int a = (int)order[i], b = (int)order[k], c = (int)order[j];
+                const double triA = areaTri(a, b, c);
+                const double cost = std::max({ DP(i,k), DP(k,j), triA });
+                if (cost < best) { best = cost; bestK = k; }
+            }
+            DP(i,j) = best; SP(i,j) = bestK;
+        }
+    }
+
+    // Reconstruct; emit CCW triangles in original index space
+    std::vector<uint32_t> indices;
+    indices.reserve(3 * (n - 2));
+    std::function<void(int,int)> emit = [&](int i,int j){
+        int k = SP(i,j); if (k < 0) return;
+        uint32_t a = order[i], b = order[k], c = order[j];
+        if (!orientCCW(a,b,c)) std::swap(b,c);
+        indices.push_back(a); indices.push_back(b); indices.push_back(c);
+        cumulatedEdgeLength += periTri(a,b,c);
+        emit(i,k);
+        emit(k,j);
+    };
+    emit(0, n - 1);
+
+    out = std::move(indices);
+    return out;
+}
+
+std::vector<uint32_t>
+TriangleFactory::TriangulatePolygon_CDT(const std::vector<Vertex>& vertices)
+{
+    const int n = (int)vertices.size();
+    Eigen::Matrix<double, Eigen::Dynamic, 2> V(n,2);
+    for (int i=0;i<n;++i) {
+        V(i,0) = vertices[i].position.x;
+        V(i,1) = vertices[i].position.y;
+    }
+
+    // Boundary edges (i, i+1) with wrap
+    Eigen::Matrix<int, Eigen::Dynamic, 2> E(n,2);
+    for (int i=0;i<n;++i) {
+        E(i,0) = i;
+        E(i,1) = (i+1) % n;
+    }
+
+    Eigen::Matrix<double, Eigen::Dynamic, 2> H(0,2); // no holes
+    const std::string flags = "pQz"; // p = PSLG (respect segments)
+
+    Eigen::Matrix<double, Eigen::Dynamic, 2> Vout;
+    Eigen::Matrix<int,    Eigen::Dynamic, 3> Fout;
+    igl::triangle::triangulate(V, E, H, flags, Vout, Fout);
+
+    std::vector<uint32_t> idx; idx.reserve(Fout.rows()*3);
+    for (int t=0;t<Fout.rows();++t) {
+        idx.push_back((uint32_t)Fout(t,0));
+        idx.push_back((uint32_t)Fout(t,1));
+        idx.push_back((uint32_t)Fout(t,2));
+    }
+    return idx;
 }

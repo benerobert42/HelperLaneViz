@@ -13,4 +13,5 @@
 
 namespace GeometryFactory {
     std::vector<Vertex> CreateVerticesForCircle(int numVertices, float radius);
+    std::vector<Vertex> CreateVerticesForEllipse(int numVertices, float a, float b);
 }

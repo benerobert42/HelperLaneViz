@@ -14,8 +14,8 @@
             filePath = "HelperLaneViz/Renderer.mm"
             startingColumnNumber = "9223372036854775807"
             endingColumnNumber = "9223372036854775807"
-            startingLineNumber = "81"
-            endingLineNumber = "81"
+            startingLineNumber = "148"
+            endingLineNumber = "148"
             landmarkName = "-initWithMetalKitView:"
             landmarkType = "7">
          </BreakpointContent>
@@ -23,16 +23,48 @@
       <BreakpointProxy
          BreakpointExtensionID = "Xcode.Breakpoint.FileBreakpoint">
          <BreakpointContent
-            uuid = "69943978-3E0A-43C9-9F1D-09FDB58B1371"
+            uuid = "CF35DD39-6D26-4209-87EF-D8D482DDEBC1"
             shouldBeEnabled = "Yes"
+            ignoreCount = "0"
+            continueAfterRunningActions = "No"
+            filePath = "HelperLaneViz/SVGLoader.cpp"
+            startingColumnNumber = "9223372036854775807"
+            endingColumnNumber = "9223372036854775807"
+            startingLineNumber = "199"
+            endingLineNumber = "199"
+            landmarkName = "SVGLoader::TessellateSvgToMesh(filePath, outPositions, outIndices, bezierMaxDeviationPx)"
+            landmarkType = "7">
+         </BreakpointContent>
+      </BreakpointProxy>
+      <BreakpointProxy
+         BreakpointExtensionID = "Xcode.Breakpoint.FileBreakpoint">
+         <BreakpointContent
+            uuid = "DB50F5B6-EB35-4D1F-B894-CAD90E7E44F0"
+            shouldBeEnabled = "No"
             ignoreCount = "0"
             continueAfterRunningActions = "No"
             filePath = "HelperLaneViz/Renderer.mm"
             startingColumnNumber = "9223372036854775807"
             endingColumnNumber = "9223372036854775807"
-            startingLineNumber = "85"
-            endingLineNumber = "85"
-            landmarkName = "-initWithMetalKitView:"
+            startingLineNumber = "236"
+            endingLineNumber = "236"
+            landmarkName = "-drawInMTKView:"
+            landmarkType = "7">
+         </BreakpointContent>
+      </BreakpointProxy>
+      <BreakpointProxy
+         BreakpointExtensionID = "Xcode.Breakpoint.FileBreakpoint">
+         <BreakpointContent
+            uuid = "D0D2BF51-23F4-436C-8D39-27B8F763560F"
+            shouldBeEnabled = "No"
+            ignoreCount = "0"
+            continueAfterRunningActions = "No"
+            filePath = "HelperLaneViz/SVGLoader.cpp"
+            startingColumnNumber = "9223372036854775807"
+            endingColumnNumber = "9223372036854775807"
+            startingLineNumber = "282"
+            endingLineNumber = "282"
+            landmarkName = "SVGLoader::TessellateSvgToMesh(filePath, outPositions, outIndices, bezierMaxDeviationPx)"
             landmarkType = "7">
          </BreakpointContent>
       </BreakpointProxy>

@@ -24,6 +24,9 @@
     id<MTLRenderPipelineState> _pipelineState;
     id<MTLDepthStencilState> _depthState;
 
+    id<MTLRenderPipelineState> _overdrawPipelineState;
+    id<MTLDepthStencilState> _overdrawDepthState;
+
     id<MTLBuffer> _vertexBuffer;
     id<MTLBuffer> _indexBuffer;
 
@@ -32,6 +35,7 @@
     vector_uint2 _viewportSize;
 
     GridParams _gridParams;
+    bool _useOverDrawPass;
 }
 
 - (id<MTLRenderPipelineState>) createPSOWith:(nonnull MTKView*)mtkView {
@@ -50,6 +54,43 @@
     id<MTLRenderPipelineState> psObject = [_device newRenderPipelineStateWithDescriptor:psDesc error:&error];
     NSAssert(psObject, @"Failed to create pipeline state: %@", error);
     return psObject;
+}
+
+- (id<MTLRenderPipelineState>) createOverdrawPSOWith:(nonnull MTKView*)mtkView {
+    id<MTLLibrary> defaultLibrary = [_device newDefaultLibrary];
+    id<MTLFunction> vertexFunction = [defaultLibrary newFunctionWithName:@"vertexShader"];
+    id<MTLFunction> fragmentFunction = [defaultLibrary newFunctionWithName:@"overdrawFragment"];
+
+    MTLRenderPipelineDescriptor *psDesc = [MTLRenderPipelineDescriptor new];
+    psDesc.vertexFunction = vertexFunction;
+    psDesc.fragmentFunction = fragmentFunction;
+    psDesc.colorAttachments[0].pixelFormat = mtkView.colorPixelFormat;
+
+    psDesc.depthAttachmentPixelFormat   = mtkView.depthStencilPixelFormat;
+    psDesc.stencilAttachmentPixelFormat = MTLPixelFormatInvalid;
+
+    // Enable additive blending: dst = src + dst
+    auto *ca0 = psDesc.colorAttachments[0];
+    ca0.blendingEnabled = YES;
+    ca0.rgbBlendOperation = MTLBlendOperationAdd;
+    ca0.alphaBlendOperation = MTLBlendOperationAdd;
+    ca0.sourceRGBBlendFactor = MTLBlendFactorOne;
+    ca0.destinationRGBBlendFactor = MTLBlendFactorOne;
+    ca0.sourceAlphaBlendFactor = MTLBlendFactorOne;
+    ca0.destinationAlphaBlendFactor = MTLBlendFactorOne;
+
+    // (Depth format is irrelevant; we’ll disable depth test for this pass.)
+    NSError *err = nil;
+    id<MTLRenderPipelineState> pso = [_device newRenderPipelineStateWithDescriptor:psDesc error:&err];
+    NSAssert(pso, @"Overdraw PSO failed: %@", err);
+    return pso;
+}
+
+- (id<MTLDepthStencilState>) createNoDepthDSS {
+    MTLDepthStencilDescriptor *ds = [MTLDepthStencilDescriptor new];
+    ds.depthWriteEnabled   = NO;
+    ds.depthCompareFunction = MTLCompareFunctionAlways; // accept every fragment
+    return [_device newDepthStencilStateWithDescriptor:ds];
 }
 
 - (id<MTLDepthStencilState>) createDSS {
@@ -73,25 +114,36 @@
 
         _pipelineState = [self createPSOWith:mtkView];
         _depthState = [self createDSS];
+
+        _overdrawPipelineState = [self createOverdrawPSOWith:mtkView];
+        _overdrawDepthState    = [self createNoDepthDSS];
+
         _commandQueue = [_device newCommandQueue];
 
-        std::vector<Vertex> vertices;
-        std::vector<uint32_t> indicesUnused;
-        SVGLoader::TessellateSvgToMesh("/Users/robi/Downloads/drip-coffee-maker.svg", vertices, indicesUnused);
+//        std::vector<Vertex> vertices;
+//        std::vector<uint32_t> indicesUnused;
+//        SVGLoader::TessellateSvgToMesh("/Users/robi/Downloads/Tractor2.svg", vertices, indicesUnused);
 
-//        auto vertices = GeometryFactory::CreateVerticesForCircle(3000, 0.015);
-        std::vector<uint32_t> indices = TriangleFactory::CreateConvexMWT(vertices);
+        double cumulatedEdgeLength;
+        auto vertices = GeometryFactory::CreateVerticesForEllipse(500, 1, 1);
+//        std::vector<uint32_t> indices = TriangleFactory::CreateConvexMWT(vertices, cumulatedEdgeLength);
 //        std::vector<uint32_t> indices = TriangleFactory::CreateCentralTriangulation(vertices);
-//        std::vector<uint32_t> indices = TriangleFactory::CreateDelauneyTriangulation(vertices);
-//        std::vector<uint32_t> indices = TriangleFactory::CreateMaxAreaTriangulation(vertices);
+        std::vector<uint32_t> indices = TriangleFactory::TriangulatePolygon_CDT(vertices);
+//        std::vector<uint32_t> indices = TriangleFactory::CreateStripTriangulation(vertices);
+//        std::vector<uint32_t> indices = TriangleFactory::CreateConvexMinMaxAreaTriangulation(vertices, cumulatedEdgeLength);
 
+        std::cout << "Cumulated edge length: " << cumulatedEdgeLength << std::endl;
+
+        uint32_t gridSegmentCount = 2;
         _gridParams = {
-            .cols = 1,
-            .rows = 1,
-            .cellSize = {2.0 / 1, 2.0 / 1},
+            .cols = gridSegmentCount,
+            .rows = gridSegmentCount,
+            .cellSize = {static_cast<float>(2.0 / gridSegmentCount), static_cast<float>(2.0 / gridSegmentCount)},
             .origin = {-0.99, -0.99},
-            .scale = 1.0
+            .scale = 0.5
         };
+
+        _useOverDrawPass = false;
 
         _vertexBuffer = [_device newBufferWithBytes:vertices.data()
                                     length:vertices.size() * sizeof(Vertex)
@@ -119,62 +171,95 @@
 {
     id<MTLCommandBuffer> commandBuffer = [_commandQueue commandBuffer];
 
-    *reinterpret_cast<uint32_t *>(_counterBuffer.contents) = 0;
-    if (_counterBuffer.storageMode == MTLStorageModeManaged) {
-        id<MTLBlitCommandEncoder> blit = [commandBuffer blitCommandEncoder];
-        [blit synchronizeResource:_counterBuffer]; // make CPU write visible to GPU
-        [blit endEncoding];
-    }
-
     MTLRenderPassDescriptor *renderPassDescriptor = view.currentRenderPassDescriptor;
     if(renderPassDescriptor != nil) {
-        id<MTLRenderCommandEncoder> encoder =
-        [commandBuffer renderCommandEncoderWithDescriptor:renderPassDescriptor];
+        if (_useOverDrawPass) {
+            id<MTLRenderCommandEncoder> encoder =
+            [commandBuffer renderCommandEncoderWithDescriptor:renderPassDescriptor];
 
-        [encoder setRenderPipelineState:_pipelineState];
-        [encoder setDepthStencilState:_depthState];
+            [encoder setRenderPipelineState:_overdrawPipelineState];
+            [encoder setDepthStencilState:_overdrawDepthState];
 
-        FrameConstants frameConstants{
-            .viewProjectionMatrix = matrix_identity_float4x4,
-            .viewPortSize = _viewportSize
-        };
+            FrameConstants frameConstants{
+                .viewProjectionMatrix = matrix_identity_float4x4,
+                .viewPortSize = _viewportSize
+            };
 
-        [encoder setFragmentBuffer:_counterBuffer
-                           offset:0
-                          atIndex:0];
+            [encoder setVertexBytes:&frameConstants
+                             length:sizeof(frameConstants)
+                            atIndex:VertexInputIndexFrameConstants];
 
-        [encoder setVertexBytes:&frameConstants
-                         length:sizeof(frameConstants)
-                        atIndex:VertexInputIndexFrameConstants];
+            [encoder setVertexBuffer:_vertexBuffer offset:0 atIndex:0];
 
-        [encoder setVertexBuffer:_vertexBuffer offset:0 atIndex:0];
+            [encoder setVertexBytes:&_gridParams
+                             length:sizeof(_gridParams)
+                            atIndex:2];
 
-        [encoder setVertexBytes:&_gridParams
-                         length:sizeof(_gridParams)
-                        atIndex:2];
+            [encoder drawIndexedPrimitives:MTLPrimitiveTypeTriangle
+                                indexCount:_indexBuffer.length / sizeof(uint32_t)
+                                 indexType:MTLIndexTypeUInt32
+                               indexBuffer:_indexBuffer
+                         indexBufferOffset:0
+                             instanceCount:1];
 
-        [encoder drawIndexedPrimitives:MTLPrimitiveTypeTriangle
-                            indexCount:_indexBuffer.length / sizeof(uint32_t)
-                             indexType:MTLIndexTypeUInt32
-                           indexBuffer:_indexBuffer
-                     indexBufferOffset:0
-                         instanceCount:1];
+            [encoder endEncoding];
 
-        [encoder endEncoding];
+            [commandBuffer presentDrawable:view.currentDrawable];
 
-        id<MTLBlitCommandEncoder> blit = [commandBuffer blitCommandEncoder];
-        [blit synchronizeResource:_counterBuffer];
-        [blit endEncoding];
+        } else {
+            *reinterpret_cast<uint32_t *>(_counterBuffer.contents) = 0;
+            if (_counterBuffer.storageMode == MTLStorageModeManaged) {
+                id<MTLBlitCommandEncoder> blit = [commandBuffer blitCommandEncoder];
+                [blit synchronizeResource:_counterBuffer]; // make CPU write visible to GPU
+                [blit endEncoding];
+            }
 
-        [commandBuffer addCompletedHandler:^(id<MTLCommandBuffer> _Nonnull) {
-            const uint32_t total = *reinterpret_cast<const uint32_t *>(self->_counterBuffer.contents);
-            printf("Total helper fragments this frame: %u\n", total);
-        }];
+            id<MTLRenderCommandEncoder> encoder =
+            [commandBuffer renderCommandEncoderWithDescriptor:renderPassDescriptor];
 
-        [commandBuffer presentDrawable:view.currentDrawable];
+            [encoder setRenderPipelineState:_pipelineState];
+            [encoder setDepthStencilState:_depthState];
+            [encoder setTriangleFillMode:MTLTriangleFillModeLines];
+            FrameConstants frameConstants{
+                .viewProjectionMatrix = matrix_identity_float4x4,
+                .viewPortSize = _viewportSize
+            };
+
+            [encoder setFragmentBuffer:_counterBuffer
+                                offset:0
+                               atIndex:0];
+
+            [encoder setVertexBytes:&frameConstants
+                             length:sizeof(frameConstants)
+                            atIndex:VertexInputIndexFrameConstants];
+
+            [encoder setVertexBuffer:_vertexBuffer offset:0 atIndex:0];
+
+            [encoder setVertexBytes:&_gridParams
+                             length:sizeof(_gridParams)
+                            atIndex:2];
+
+            [encoder drawIndexedPrimitives:MTLPrimitiveTypeTriangle
+                                indexCount:_indexBuffer.length / sizeof(uint32_t)
+                                 indexType:MTLIndexTypeUInt32
+                               indexBuffer:_indexBuffer
+                         indexBufferOffset:0
+                             instanceCount:4];
+
+            [encoder endEncoding];
+
+            id<MTLBlitCommandEncoder> blit = [commandBuffer blitCommandEncoder];
+            [blit synchronizeResource:_counterBuffer];
+            [blit endEncoding];
+
+            [commandBuffer addCompletedHandler:^(id<MTLCommandBuffer> _Nonnull) {
+                const uint32_t total = *reinterpret_cast<const uint32_t *>(self->_counterBuffer.contents);
+            }];
+
+            [commandBuffer presentDrawable:view.currentDrawable];
+        }
     }
     [commandBuffer commit];
 }
 
 @end
-

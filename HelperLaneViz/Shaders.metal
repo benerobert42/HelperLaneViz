@@ -63,3 +63,10 @@ fragment float4 fragmentShader(RasterizerData in [[stage_in]],
 
     return colors[sum];
 }
+
+// Overdraw fragment: adds a small gray value each time a fragment lands
+fragment float4 overdrawFragment(RasterizerData in [[stage_in]])
+{
+    constexpr float kIncrement = 1.0;   // visualize up to ~8 layers before clamping to white
+    return float4(kIncrement, kIncrement, kIncrement, kIncrement);
+}
