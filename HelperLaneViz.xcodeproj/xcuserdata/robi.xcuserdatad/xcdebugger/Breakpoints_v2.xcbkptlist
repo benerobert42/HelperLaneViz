@@ -14,8 +14,8 @@
             filePath = "HelperLaneViz/Renderer.mm"
             startingColumnNumber = "9223372036854775807"
             endingColumnNumber = "9223372036854775807"
-            startingLineNumber = "148"
-            endingLineNumber = "148"
+            startingLineNumber = "371"
+            endingLineNumber = "371"
             landmarkName = "-initWithMetalKitView:"
             landmarkType = "7">
          </BreakpointContent>
@@ -46,8 +46,8 @@
             filePath = "HelperLaneViz/Renderer.mm"
             startingColumnNumber = "9223372036854775807"
             endingColumnNumber = "9223372036854775807"
-            startingLineNumber = "236"
-            endingLineNumber = "236"
+            startingLineNumber = "545"
+            endingLineNumber = "545"
             landmarkName = "-drawInMTKView:"
             landmarkType = "7">
          </BreakpointContent>
