@@ -22,35 +22,14 @@
     _view = (MTKView *)self.view;
     _view.device = MTLCreateSystemDefaultDevice();
 
-    _view.autoResizeDrawable = NO;
+    _view.autoResizeDrawable = YES;
     NSScreen *scr = self.view.window.screen ?: NSScreen.mainScreen;
-    CGFloat scale = scr.backingScaleFactor ?: 1.0;
-    _view.layer.contentsScale = scale;
-    _view.drawableSize = CGSizeMake(1920, 1080);
 
     _renderer = [[Renderer alloc] initWithMetalKitView:_view];
     NSAssert(_renderer, @"Renderer failed initialization");
 
     [_renderer mtkView:_view drawableSizeWillChange:_view.drawableSize];
     _view.delegate = _renderer;
-
-    _tilesButton = [NSButton buttonWithTitle:@"Tiles"
-                                         target:self
-                                      action:@selector(runTileProbe:)];
-       _tilesButton.bezelStyle = NSBezelStyleRounded;
-       _tilesButton.translatesAutoresizingMaskIntoConstraints = NO;
-       [self.view addSubview:_tilesButton];
-
-       [NSLayoutConstraint activateConstraints:@[
-           [_tilesButton.topAnchor constraintEqualToAnchor:self.view.topAnchor constant:8],
-           [_tilesButton.leadingAnchor constraintEqualToAnchor:self.view.leadingAnchor constant:8]
-       ]];
-}
-
-- (IBAction)runTileProbe:(id)sender {
-    _tilesButton.enabled = NO;
-    [_renderer measureTilesNow];
-    _tilesButton.enabled = YES;
 }
 
 @end

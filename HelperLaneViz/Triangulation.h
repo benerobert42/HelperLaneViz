@@ -12,6 +12,8 @@
 #include <simd/simd.h>
 #include <vector>
 
+#include <unordered_set>
+
 struct EdgeMetrics {
     double unique_all = 0.0;
     double interior_sum = 0.0;
@@ -28,6 +30,19 @@ struct Triangulation {
     double totalCost = 0.0;
 };
 
+// Edge length measurements
+struct EdgeKey {
+    uint32_t a, b;
+    EdgeKey(uint32_t i, uint32_t j) { if (i < j) { a=i; b=j; } else { a=j; b=i; } }
+    bool operator==(const EdgeKey& o) const { return a==o.a && b==o.b; }
+};
+struct EdgeKeyHash {
+    size_t operator()(const EdgeKey& e) const noexcept {
+        // 32-bit pair hash
+        return (size_t)e.a * 1315423911u ^ (size_t)e.b;
+    }
+};
+
 namespace TriangleFactory {
     std::vector<uint32_t> CreateConvexMWT(const std::vector<Vertex>& vertices,
                                           double& cumulatedEdgeLength);
@@ -38,7 +53,7 @@ namespace TriangleFactory {
     std::vector<uint32_t> CreateStripTriangulation(const std::vector<Vertex>& vertices);
 
     std::vector<uint32_t> CreateConvexMinMaxAreaTriangulation(const std::vector<Vertex>& vertices,
-                                                     double& cumulatedEdgeLength);
+                                                              double& cumulatedEdgeLength);
 
     std::vector<uint32_t> CreateConvexMaxMinAreaTriangulation(const std::vector<Vertex>& vertices,
                                                               double& cumulatedEdgeLength);
@@ -46,6 +61,15 @@ namespace TriangleFactory {
     std::vector<uint32_t>
     TriangulatePolygon_CDT(const std::vector<Vertex>& vertices);
 
+    std::unordered_set<EdgeKey, EdgeKeyHash> interior_edge_set(const std::vector<uint32_t>& triIndices);
+    double interior_projected_length_px(const std::vector<Vertex>& verts,
+                                        const std::vector<uint32_t>& triIndices,
+                                        const simd_float4x4& VP,
+                                        simd_int2 framebufferPx);
+    double unique_length_3d(const std::vector<Vertex>& verts,
+                            const std::vector<uint32_t>& triIndices);
+    double interior_length_3d(const std::vector<Vertex>& verts,
+                              const std::vector<uint32_t>& triIndices);
     EdgeMetrics compute_edge_metrics(const std::vector<Vertex>& verts,
-                                                    const std::vector<uint32_t>& triIndices);
+                                     const std::vector<uint32_t>& triIndices);
 }

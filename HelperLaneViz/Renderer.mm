@@ -165,13 +165,24 @@
         _overdrawDepthState  = [self createNoDepthDSS];
 
         _commandQueue = [_device newCommandQueue];
-//        const auto outPath = std::filesystem::temp_directory_path() / "ellipsoidAni80Del2.obj";
-//        std::cerr << "[DBG] temp dir: " << std::filesystem::temp_directory_path() << "\n";
 
-//        CGALTriangulateFile("/Users/robi/Downloads/ellipsoid_ani_80_vertices_only.obj", outPath);
-//        CGALTriangulator::TriangulateVertexOnlyEllipsoidOBJ("/Users/robi/Downloads/ellipsoid_ani_80_vertices_only.obj",
-//                                                            outPath,
-//                                                            TriMode::Delaunay);
+//        const auto tmp = std::filesystem::temp_directory_path();
+//        const auto outPath = tmp / "torus_crescent_band_lowOutDel.obj";
+//        std::cerr << "[DBG] temp dir: " << tmp << "\n";
+
+        // For the OBJ I gave you: 24 rows -> stacks=23, slices=160, wrap=true inside your builder
+//        const int stacks = 7;
+//        const int slices = 12;
+//
+//        const std::string inPath = "/Users/robi/Downloads/torus_crescent_band_low.obj";
+//        const std::string outPathStr = outPath.string();
+//
+//        const bool ok = CGALTriangulator::TriangulateVertexOnlyEllipsoidOBJ(inPath,
+//                                                                            outPathStr,
+//                                                                            TriangulationMode::Delaunay,
+//                                                                            stacks,
+//                                                                            slices,
+//                                                                            false);
 //        std::vector<Vertex> vertices;
 //        std::vector<uint32_t> indicesUnused;
 //        SVGLoader::TessellateSvgToMesh("/Users/robi/Downloads/Tractor2.svg", vertices, indicesUnused);
@@ -188,17 +199,53 @@
 
 //        std::cout << "Cumulated edge length: " << cumulatedEdgeLength << std::endl;
 
-        _gridParams = [self createGridParamsForSegmentCount:30 andOrigin:simd_float2{0, 0} andScale:0.8];
+        _gridParams = [self createGridParamsForSegmentCount:3 andOrigin:simd_float2{-0.99, -0.99} andScale:0.4];
 
         _useOverDrawPass = false;
 
         std::vector<Vertex> vertices;
         std::vector<uint32_t> indices;
-        bool success = AssetLoader::LoadPositionsAndIndicesFromObj(_device, @"/Users/robi/Downloads/ellipsoidAni80MWT2.obj", vertices, indices);
+        bool success = AssetLoader::LoadPositionsAndIndicesFromObj(_device, @"/Users/robi/Downloads/ellipsoid_oblate_cap_lowOutMWT.obj", vertices, indices);
 
-        EdgeMetrics metrics  = TriangleFactory::compute_edge_metrics(vertices, indices);
-        printf("[MWT]  interior (diagonals) length = %.9f  | boundary = %.9f  | unique_all = %.9f  | nonmanifold=%zu\n",
-               metrics.interior_sum, metrics.boundary_sum, metrics.unique_all, metrics.nonmanifold_count);
+        std::vector<Vertex> verticesDel;
+        std::vector<uint32_t> indicesDel;
+        bool successDel = AssetLoader::LoadPositionsAndIndicesFromObj(_device, @"/Users/robi/Downloads/ellipsoid_oblate_cap_lowOutDel.obj", verticesDel, indicesDel);
+
+        auto S_mwt = TriangleFactory::interior_edge_set(indices);
+        auto S_del = TriangleFactory::interior_edge_set(indicesDel);
+
+        size_t common = 0;
+        for (const auto& e : S_mwt) if (S_del.count(e)) ++common;
+
+        const size_t union_sz = S_mwt.size() + S_del.size() - common;
+        const double jaccard  = union_sz ? double(common) / double(union_sz) : 1.0;
+
+        printf("[EDGES] interior: mwt=%zu del=%zu common=%zu  Jaccard=%.3f\n",
+               S_mwt.size(), S_del.size(), common, jaccard);
+
+        simd_float4x4 viewMat = createLookAtRhs(simd_make_float3(0, 0, -3),
+                                                simd_make_float3(0, 0, 0),
+                                                simd_make_float3(0, 1, 0));
+        simd_float4x4 projMat = makePerspective(M_PI_4, 1, 0.1, 40);
+        simd_float4x4 viewProjMat = simd_mul(projMat, viewMat);
+
+        // Projected interior-length (wireframe-visible difference; pass your VP and framebuffer)
+        double Lpx_mwt = TriangleFactory::interior_projected_length_px(vertices, indices, viewProjMat, simd_make_int2(mtkView.drawableSize.width, mtkView.drawableSize.height));
+        double Lpx_del = TriangleFactory::interior_projected_length_px(verticesDel, indicesDel, viewProjMat, simd_make_int2(mtkView.drawableSize.width, mtkView.drawableSize.height));
+        printf("[EDGES] interior_projected_px: MWT=%.2f  Delaunay=%.2f  Δ=%.2f (px)\n",
+               Lpx_mwt, Lpx_del, Lpx_mwt - Lpx_del);
+
+        // 3D INTERIOR-only length (usually the more sensitive comparison)
+        double L3D_int_mwt = TriangleFactory::interior_length_3d(vertices, indices);
+        double L3D_int_del = TriangleFactory::interior_length_3d(verticesDel, indicesDel);
+        printf("[EDGES] interior_3D:          MWT=%.6f  Delaunay=%.6f  Δ=%.6f\n",
+               L3D_int_mwt, L3D_int_del, L3D_int_mwt - L3D_int_del);
+
+        // 3D length over ALL unique edges (boundary + interior) — often similar across triangulations
+        double L3D_all_mwt = TriangleFactory::unique_length_3d(vertices, indices);
+        double L3D_all_del = TriangleFactory::unique_length_3d(verticesDel, indicesDel);
+        printf("[EDGES] unique_all_3D:        MWT=%.6f  Delaunay=%.6f  Δ=%.6f\n",
+               L3D_all_mwt, L3D_all_del, L3D_all_mwt - L3D_all_del);
 
         _vertexBuffer = [_device newBufferWithBytes:vertices.data()
                                     length:vertices.size() * sizeof(Vertex)
@@ -301,9 +348,9 @@ typedef struct {
     renderPassDescriptor.tileWidth = 32;
     renderPassDescriptor.tileHeight = 32;
     if(renderPassDescriptor != nil) {
-        simd_float4x4 viewMat = createLookAtRhs(simd_make_float3(0, 5, 0),
+        simd_float4x4 viewMat = createLookAtRhs(simd_make_float3(0, 0, -3),
                                                 simd_make_float3(0, 0, 0),
-                                                simd_make_float3(0, 0, -1));
+                                                simd_make_float3(0, 1, 0));
         simd_float4x4 projMat = makePerspective(M_PI_4, 1, 0.1, 40);
         simd_float4x4 viewProjMat = simd_mul(projMat, viewMat);
 

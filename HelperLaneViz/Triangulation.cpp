@@ -17,6 +17,8 @@
 #include <Eigen/Core>
 #include <igl/triangle/triangulate.h>
 
+#include <unordered_set>
+
 // Assumes vertices are the boundary of a convex polygon
 std::vector<uint32_t> TriangleFactory::CreateConvexMWT(const std::vector<Vertex>& vertices,
                                                        double& cumulatedEdgeLength) {
@@ -612,19 +614,6 @@ TriangleFactory::TriangulatePolygon_CDT(const std::vector<Vertex>& vertices)
     return idx;
 }
 
-// Edge length measurements
-struct EdgeKey {
-    uint32_t a, b;
-    EdgeKey(uint32_t i, uint32_t j) { if (i < j) { a=i; b=j; } else { a=j; b=i; } }
-    bool operator==(const EdgeKey& o) const { return a==o.a && b==o.b; }
-};
-struct EdgeKeyHash {
-    size_t operator()(const EdgeKey& e) const noexcept {
-        // 32-bit pair hash
-        return (size_t)e.a * 1315423911u ^ (size_t)e.b;
-    }
-};
-
 static inline double edge_len(const Vertex& P, const Vertex& Q) {
     const double dx = double(Q.position.x) - double(P.position.x);
     const double dy = double(Q.position.y) - double(P.position.y);
@@ -642,8 +631,11 @@ static inline double edge_len(const Vertex& P, const Vertex& Q) {
  *
  * Returns counts as well so you can sanity-check topology.
  */
-EdgeMetrics TriangleFactory::compute_edge_metrics(const std::vector<Vertex>& verts,
-                                 const std::vector<uint32_t>& triIndices)
+
+// --- Helpers to reuse your edge histogram -----------------------------
+
+static std::unordered_map<EdgeKey, uint32_t, EdgeKeyHash>
+build_edge_hist(const std::vector<uint32_t>& triIndices)
 {
     std::unordered_map<EdgeKey, uint32_t, EdgeKeyHash> hist;
     hist.reserve(triIndices.size()); // rough
@@ -653,16 +645,93 @@ EdgeMetrics TriangleFactory::compute_edge_metrics(const std::vector<Vertex>& ver
         ++hist[e];
     };
 
-    // accumulate edge usage counts
     const size_t T = triIndices.size() / 3;
     for (size_t t = 0; t < T; ++t) {
-        uint32_t i = triIndices[3*t+0];
-        uint32_t j = triIndices[3*t+1];
-        uint32_t k = triIndices[3*t+2];
+        const uint32_t i = triIndices[3*t+0];
+        const uint32_t j = triIndices[3*t+1];
+        const uint32_t k = triIndices[3*t+2];
         add_edge(i,j);
         add_edge(j,k);
         add_edge(k,i);
     }
+    return hist;
+}
+
+// Interior-edge set (edges used by exactly 2 triangles).
+std::unordered_set<EdgeKey, EdgeKeyHash>
+TriangleFactory::interior_edge_set(const std::vector<uint32_t>& triIndices)
+{
+    auto hist = build_edge_hist(triIndices);
+    std::unordered_set<EdgeKey, EdgeKeyHash> S;
+    S.reserve(hist.size());
+    for (const auto& kv : hist) if (kv.second == 2) S.insert(kv.first);
+    return S;
+}
+
+static inline simd_float2 to_ndc(const Vertex& v, const simd_float4x4& VP) {
+    simd_float4 p = { v.position.x, v.position.y, v.position.z, 1.0f };
+    simd_float4 c = simd_mul(VP, p);
+    const float iw = (c.w != 0.0f) ? (1.0f / c.w) : 0.0f;
+    return { c.x * iw, c.y * iw };
+}
+static inline simd_float2 ndc_to_px(simd_float2 n, simd_int2 fb) {
+    // NDC (-1..1) -> pixel coords
+    return { 0.5f * (n.x + 1.0f) * fb.x, 0.5f * (1.0f - n.y) * fb.y };
+}
+
+// Sum of PROJECTED lengths of INTERIOR edges only (what your eye sees in wireframe; good tiler proxy).
+double TriangleFactory::interior_projected_length_px(const std::vector<Vertex>& verts,
+                                    const std::vector<uint32_t>& triIndices,
+                                    const simd_float4x4& VP,
+                                    simd_int2 framebufferPx)
+{
+    auto hist = build_edge_hist(triIndices);
+
+    double sum = 0.0;
+    for (const auto& kv : hist) {
+        if (kv.second != 2) continue; // interior only
+        const EdgeKey& e = kv.first;
+        simd_float2 a_ndc = to_ndc(verts[e.a], VP);
+        simd_float2 b_ndc = to_ndc(verts[e.b], VP);
+        simd_float2 a_px  = ndc_to_px(a_ndc, framebufferPx);
+        simd_float2 b_px  = ndc_to_px(b_ndc, framebufferPx);
+        double dx = double(a_px.x) - double(b_px.x);
+        double dy = double(a_px.y) - double(b_px.y);
+        sum += std::sqrt(dx*dx + dy*dy);
+    }
+    return sum;
+}
+
+// Sum of INTERIOR edge lengths in 3D (edges used by exactly 2 triangles)
+double TriangleFactory::interior_length_3d(const std::vector<Vertex>& verts,
+                                           const std::vector<uint32_t>& triIndices)
+{
+    auto hist = build_edge_hist(triIndices);
+    double sum = 0.0;
+    for (const auto& kv : hist) {
+        if (kv.second != 2) continue; // interior only
+        const EdgeKey& e = kv.first;
+        sum += edge_len(verts[e.a], verts[e.b]);
+    }
+    return sum;
+}
+
+// Sum of ALL unique edge lengths in 3D (boundary + interior)
+double TriangleFactory::unique_length_3d(const std::vector<Vertex>& verts,
+                                         const std::vector<uint32_t>& triIndices)
+{
+    auto hist = build_edge_hist(triIndices);
+    double sum = 0.0;
+    for (const auto& kv : hist) {
+        const EdgeKey& e = kv.first;
+        sum += edge_len(verts[e.a], verts[e.b]);
+    }
+    return sum;
+}
+
+EdgeMetrics TriangleFactory::compute_edge_metrics(const std::vector<Vertex>& verts,
+                                 const std::vector<uint32_t>& triIndices) {
+    auto hist = build_edge_hist(triIndices);
 
     EdgeMetrics m;
     m.unique_count = hist.size();

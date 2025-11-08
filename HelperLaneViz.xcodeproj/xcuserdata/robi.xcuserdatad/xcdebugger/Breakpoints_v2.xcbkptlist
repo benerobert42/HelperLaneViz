@@ -30,8 +30,8 @@
             filePath = "HelperLaneViz/Renderer.mm"
             startingColumnNumber = "9223372036854775807"
             endingColumnNumber = "9223372036854775807"
-            startingLineNumber = "370"
-            endingLineNumber = "370"
+            startingLineNumber = "417"
+            endingLineNumber = "417"
             landmarkName = "-drawInMTKView:"
             landmarkType = "7">
          </BreakpointContent>

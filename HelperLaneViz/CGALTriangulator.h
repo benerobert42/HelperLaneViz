@@ -8,12 +8,15 @@
 #pragma once
 #include <string>
 
-enum class TriMode { Delaunay, MWT };
+enum class TriangulationMode { Delaunay, MWT };
 
 namespace CGALTriangulator {
+
 bool TriangulateVertexOnlyEllipsoidOBJ(const std::string& in_path,
                                        const std::string& out_path,
-                                       TriMode mode,
+                                       TriangulationMode mode,
                                        int stacks = -1,
-                                       int slices = -1);
-}
+                                       int slices = -1,
+                                       bool wrapColumns = true);
+
+} // namespace CGALTriangulator

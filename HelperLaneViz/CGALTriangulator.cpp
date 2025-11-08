@@ -5,6 +5,8 @@
 //  Created by Robert Bene on 2025. 10. 26..
 //
 
+#include "CGALTriangulator.h"
+
 #include <CGAL/Exact_predicates_inexact_constructions_kernel.h>
 #include <CGAL/Surface_mesh.h>
 #include <CGAL/Polygon_mesh_processing/polygon_soup_to_polygon_mesh.h>
@@ -27,8 +29,6 @@ namespace PMP = CGAL::Polygon_mesh_processing;
 using K = CGAL::Exact_predicates_inexact_constructions_kernel;
 using P3 = K::Point_3;
 using Mesh = CGAL::Surface_mesh<P3>;
-
-enum class TriangulationMode { Delaunay, MWT };
 
 namespace {
 bool ReadVerticesFromObj(std::string_view path, std::vector<P3>& pointsOut) {
@@ -85,17 +85,21 @@ std::optional<std::pair<int, int>> DeduceGridFromCount(size_t N) {
     return std::pair{bestStacks, bestSlices};
 }
 
-void BuildGridQuads(int stacks, int slices, std::vector<std::vector<size_t>>& quadsOut) {
+void BuildGridQuads(int stacks, int slices,
+                    std::vector<std::vector<size_t>>& quadsOut,
+                    bool wrapColumns)
+{
     auto idx = [&](int i, int j) -> std::size_t {
+        const int jj = wrapColumns ? (j % slices) : j;
         return static_cast<size_t>(i) * static_cast<size_t>(slices)
-             + static_cast<std::size_t>(j % slices);
+             + static_cast<size_t>(jj);
     };
 
     quadsOut.clear();
     quadsOut.reserve(static_cast<size_t>(stacks) * static_cast<size_t>(slices));
 
     for (int i = 0; i < stacks; ++i) {
-        for (int j = 0; j < slices; ++j) {
+        for (int j = 0; j < slices - (wrapColumns ? 0 : 1); ++j) {
             const size_t a = idx(i, j);
             const size_t b = idx(i, j+1);
             const size_t c = idx(i+1, j+1);
@@ -143,11 +147,12 @@ void TriangulateQuadsMWT(const std::vector<P3>& P,
 } // namespace
 
 
-bool TriangulateVertexOnlyEllipsoidOBJ(std::string_view inPath,
-                                                     std::string_view outPath,
-                                                     TriangulationMode mode,
-                                                     int stacks = -1,
-                                                     int slices = -1) {
+bool CGALTriangulator::TriangulateVertexOnlyEllipsoidOBJ(const std::string& inPath,
+                                       const std::string& outPath,
+                                       TriangulationMode mode,
+                                       int stacks,
+                                       int slices,
+                                       bool wrapColumns) {
     std::vector<P3> points;
     if (!ReadVerticesFromObj(inPath, points)) {
         std::cerr << "[Tri] ERROR: failed to read vertices from " << inPath << '\n';
@@ -173,7 +178,7 @@ bool TriangulateVertexOnlyEllipsoidOBJ(std::string_view inPath,
 
     // 1) Build quads from the grid
     std::vector<std::vector<std::size_t>> quads;
-    BuildGridQuads(stacks, slices, quads);
+    BuildGridQuads(stacks, slices, quads, wrapColumns);
 
     // 2) Produce a CGAL mesh
     Mesh mesh;
