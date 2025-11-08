@@ -22,6 +22,12 @@
     _view = (MTKView *)self.view;
     _view.device = MTLCreateSystemDefaultDevice();
 
+    _view.autoResizeDrawable = NO;
+    NSScreen *scr = self.view.window.screen ?: NSScreen.mainScreen;
+    CGFloat scale = scr.backingScaleFactor ?: 1.0;
+    _view.layer.contentsScale = scale;
+    _view.drawableSize = CGSizeMake(1920, 1080);
+
     _renderer = [[Renderer alloc] initWithMetalKitView:_view];
     NSAssert(_renderer, @"Renderer failed initialization");
 

@@ -31,11 +31,12 @@ vertexShader(uint vertexID [[ vertex_id ]],
     uint col = instanceID % gridParams.cols;
     uint row = instanceID / gridParams.cols;
 
-    float2 base = float2(col, row) * gridParams.cellSize + gridParams.origin;
-    float2 p2 = base + vertices[vertexID].position.xy * gridParams.scale;
+//    float2 base = float2(col, row) * gridParams.cellSize + gridParams.origin;
+//    float2 p2 = base + vertices[vertexID].position.xy * gridParams.scale;
+    float2 p2 = (vertices[vertexID].position.xz * 0.1) - simd_float2(1.6, 1.6) + simd_float2(row, col) * 0.15 ;
 
     // assume positions are in NDC already or pre-mapped; otherwise apply a proj*view.
-    float4 position = float4(p2, vertices[vertexID].position.z, 1.0);;
+    float4 position = float4(p2.x, vertices[vertexID].position.y, p2.y, 1.0);
     out.position = frameConstants.viewProjectionMatrix * position;
     return out;
 }

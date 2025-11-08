@@ -611,3 +611,73 @@ TriangleFactory::TriangulatePolygon_CDT(const std::vector<Vertex>& vertices)
     }
     return idx;
 }
+
+// Edge length measurements
+struct EdgeKey {
+    uint32_t a, b;
+    EdgeKey(uint32_t i, uint32_t j) { if (i < j) { a=i; b=j; } else { a=j; b=i; } }
+    bool operator==(const EdgeKey& o) const { return a==o.a && b==o.b; }
+};
+struct EdgeKeyHash {
+    size_t operator()(const EdgeKey& e) const noexcept {
+        // 32-bit pair hash
+        return (size_t)e.a * 1315423911u ^ (size_t)e.b;
+    }
+};
+
+static inline double edge_len(const Vertex& P, const Vertex& Q) {
+    const double dx = double(Q.position.x) - double(P.position.x);
+    const double dy = double(Q.position.y) - double(P.position.y);
+    const double dz = double(Q.position.z) - double(P.position.z);
+    return std::sqrt(dx*dx + dy*dy + dz*dz);
+}
+
+/**
+ * Build edge histogram and length metrics from triangle indices.
+ *
+ * - unique_all: sum of lengths over all unique edges (boundary + interior)
+ * - interior_sum: sum over edges used by exactly 2 triangles (manifold interior)
+ * - boundary_sum: sum over edges used by exactly 1 triangle (mesh boundary)
+ * - nonmanifold_sum: sum over edges used by >2 triangles
+ *
+ * Returns counts as well so you can sanity-check topology.
+ */
+EdgeMetrics TriangleFactory::compute_edge_metrics(const std::vector<Vertex>& verts,
+                                 const std::vector<uint32_t>& triIndices)
+{
+    std::unordered_map<EdgeKey, uint32_t, EdgeKeyHash> hist;
+    hist.reserve(triIndices.size()); // rough
+
+    auto add_edge = [&](uint32_t i, uint32_t j){
+        EdgeKey e{i,j};
+        ++hist[e];
+    };
+
+    // accumulate edge usage counts
+    const size_t T = triIndices.size() / 3;
+    for (size_t t = 0; t < T; ++t) {
+        uint32_t i = triIndices[3*t+0];
+        uint32_t j = triIndices[3*t+1];
+        uint32_t k = triIndices[3*t+2];
+        add_edge(i,j);
+        add_edge(j,k);
+        add_edge(k,i);
+    }
+
+    EdgeMetrics m;
+    m.unique_count = hist.size();
+
+    // sum lengths per category, once per edge
+    for (const auto& kv : hist) {
+        const EdgeKey& e = kv.first;
+        const uint32_t cnt = kv.second;
+        const double L = edge_len(verts[e.a], verts[e.b]);
+
+        m.unique_all += L;
+
+        if (cnt == 1) { m.boundary_sum += L;     ++m.boundary_count; }
+        else if (cnt == 2) { m.interior_sum += L; ++m.interior_count; }
+        else { m.nonmanifold_sum += L;           ++m.nonmanifold_count; }
+    }
+    return m;
+}
