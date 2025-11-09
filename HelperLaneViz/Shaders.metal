@@ -40,8 +40,8 @@ vertexShader(uint vertexID [[ vertex_id ]],
     return out;
 }
 
-fragment float4 fragmentShader(RasterizerData in [[stage_in]],
-                               device HelperCounter* counter [[buffer(0)]])
+fragment float4 fragmentShader(RasterizerData in [[stage_in]]
+                               /*device HelperCounter* counter [[buffer(0)]]*/)
 {
     int h = simd_is_helper_thread() ? 1 : 0;
 
@@ -59,7 +59,7 @@ fragment float4 fragmentShader(RasterizerData in [[stage_in]],
         float4(1.0, 0.0, 0.0, 1.0)   // 3 helpers → red
     };
 
-    atomic_fetch_add_explicit(&counter->helpers, sum, memory_order_relaxed);
+//    atomic_fetch_add_explicit(&counter->helpers, sum, memory_order_relaxed);
 
     return colors[sum];
 }
