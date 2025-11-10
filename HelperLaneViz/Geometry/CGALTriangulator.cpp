@@ -6,6 +6,7 @@
 //
 
 #include "CGALTriangulator.h"
+#include "ScreenSpaceFlips.h"
 
 #include <CGAL/Exact_predicates_inexact_constructions_kernel.h>
 #include <CGAL/Surface_mesh.h>
@@ -24,6 +25,8 @@
 #include <string>
 #include <string_view>
 #include <vector>
+
+#include <simd/simd.h>
 
 namespace PMP = CGAL::Polygon_mesh_processing;
 using K = CGAL::Exact_predicates_inexact_constructions_kernel;
@@ -144,6 +147,21 @@ void TriangulateQuadsMWT(const std::vector<P3>& P,
     }
 }
 
+inline bool projectToPixel(const P3& p, ssflip::V2& outPx, const simd_float4x4 & viewProjMat, simd_uint2 frameBuffer) {
+    const simd_float4 point{static_cast<float>(p.x()),
+                            static_cast<float>(p.y()),
+                            static_cast<float>(p.z()), 1.0};
+    const simd_float4 transformedPoint = simd_mul(viewProjMat, point);
+    if (transformedPoint.w <= 0.0) return false;                 // simple clip guard
+    const double invW = 1.0 / transformedPoint.w;
+    const double ndcX = transformedPoint.x * invW;
+    const double ndcY = transformedPoint.y * invW;
+    if (std::abs(ndcX) > 1.1 || std::abs(ndcY) > 1.1) return false; // culled
+    outPx[0] = (ndcX * 0.5 + 0.5) * frameBuffer.x;
+    outPx[1] = (ndcY * 0.5 + 0.5) * frameBuffer.y;
+    return true;
+}
+
 } // namespace
 
 
@@ -152,7 +170,10 @@ bool CGALTriangulator::TriangulateVertexOnlyEllipsoidOBJ(const std::string& inPa
                                        TriangulationMode mode,
                                        int stacks,
                                        int slices,
-                                       bool wrapColumns) {
+                                       bool wrapColumns,
+                                       bool applyScreenFlips,
+                                       simd_uint2 frameBuffer,
+                                       simd_float4x4 viewProjMatrix) {
     std::vector<P3> points;
     if (!ReadVerticesFromObj(inPath, points)) {
         std::cerr << "[Tri] ERROR: failed to read vertices from " << inPath << '\n';
@@ -202,6 +223,32 @@ bool CGALTriangulator::TriangulateVertexOnlyEllipsoidOBJ(const std::string& inPa
             return false;
         }
         // Already triangles; no need to call triangulate_faces again.
+    }
+
+    if (applyScreenFlips) {
+        ssflip::Params p;
+        p.framebufferWidth  = frameBuffer.x;
+        p.framebufferHeight = frameBuffer.y;
+        p.tileWidth         = 32;
+        p.tileHeight        = 32;
+        p.minTriAreaPx      = 0.5;
+        p.maxDihedralDeg    = 6.0;
+        p.minGain           = 1.0;
+
+        auto projector = [&](const P3& pt, ssflip::V2& px){
+            return projectToPixel(pt, px, viewProjMatrix, frameBuffer); // the projector shown earlier
+        };
+
+        constexpr int maxFlipIters = 1000;
+        for (int iter = 0; iter < std::max(1, maxFlipIters); ++iter) {
+            ssflip::Stats s = ssflip::flipPass(mesh, projector, p);
+            // printf("[FlipPass] iter=%d visited=%zu kept=%zu applied=%zu\n",
+            //        iter, s.edgesVisited, s.candidatesKept, s.flipsApplied);
+            if (s.flipsApplied == 0) break; // converged
+        }
+
+        // Optional: re-validate
+        // if (!CGAL::is_valid_polygon_mesh(mesh)) { /* handle */ }
     }
 
     if (!CGAL::is_valid_polygon_mesh(mesh)) {

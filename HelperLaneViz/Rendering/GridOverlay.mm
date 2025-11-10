@@ -19,19 +19,6 @@
     return self;
 }
 
-- (GridParams)createGridParamsForSegmentCount:(uint32_t)segmentCount
-                                    andOrigin:(simd_float2)origin
-                                     andScale:(float)scale {
-    GridParams params{
-        .cols = segmentCount,
-        .rows = segmentCount,
-        .cellSize = {2.f / segmentCount, 2.f / segmentCount},
-        .origin = origin,
-        .scale = scale
-    };
-    return params;
-}
-
 - (void)drawWithEncoder:(id<MTLRenderCommandEncoder>)enc drawableSize:(CGSize)size {
     // Build uniforms
     struct U { vector_uint2 tile, fb; float lineWidth; simd_float4 color; } u;

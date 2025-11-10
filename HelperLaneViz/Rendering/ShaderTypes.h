@@ -14,6 +14,7 @@ typedef enum VertexInputIndex
 {
     VertexInputIndexVertices = 0,
     VertexInputIndexFrameConstants = 1,
+    VertexInputGridParams = 2,
 } VertexInputIndex;
 
 typedef struct

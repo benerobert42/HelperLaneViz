@@ -18,8 +18,5 @@ typedef struct {
 
 @interface GridOverlay : NSObject
 - (instancetype)initWithPSO:(id<MTLRenderPipelineState>)pso noDepth:(id<MTLDepthStencilState>)noDepth;
-- (GridParams)createGridParamsForSegmentCount:(uint32_t)segmentCount
-                                    andOrigin:(simd_float2)origin
-                                     andScale:(float)scale;
 - (void)drawWithEncoder:(id<MTLRenderCommandEncoder>)enc drawableSize:(CGSize)drawableSize;
 @end
