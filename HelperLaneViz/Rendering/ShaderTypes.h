@@ -35,4 +35,12 @@ struct GridParams {
     simd_float2 origin; // bottom-left in world/NDC
     float scale; // optional uniform scale
 };
+
+typedef struct {
+    simd_uint2  tileSize;
+    simd_uint2  framebuffer;
+    float  lineWidth;
+    simd_float4 lineColor;
+    float  fillAlpha;
+} GridUniforms;
 #endif

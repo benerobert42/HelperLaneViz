@@ -18,4 +18,9 @@ void printEdgeAndTileMetrics(const std::vector<Vertex>& V_mwt,
                              simd_float4x4 viewProjection,
                              simd_int2 framebufferPx,
                              simd_int2 tileSizePx);
+
+void Print2DMeshMetrics(const std::vector<Vertex>& V,
+                        const std::vector<uint32_t>& I,
+                        simd_int2 framebufferPx,
+                        simd_int2 tileSizePx);
 }

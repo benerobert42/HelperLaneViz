@@ -19,9 +19,6 @@ bool TriangulateVertexOnlyEllipsoidOBJ(const std::string& in_path,
                                        TriangulationMode mode,
                                        int stacks = -1,
                                        int slices = -1,
-                                       bool wrapColumns = true,
-                                       bool applyScreenFlips = false,
-                                       simd_uint2 frameBuffer = {1920, 1080},
-                                       simd_float4x4 viewProjMatrix = matrix_identity_float4x4);
+                                       bool wrapColumns = true);
 
 } // namespace CGALTriangulator

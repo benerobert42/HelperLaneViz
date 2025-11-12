@@ -170,10 +170,7 @@ bool CGALTriangulator::TriangulateVertexOnlyEllipsoidOBJ(const std::string& inPa
                                        TriangulationMode mode,
                                        int stacks,
                                        int slices,
-                                       bool wrapColumns,
-                                       bool applyScreenFlips,
-                                       simd_uint2 frameBuffer,
-                                       simd_float4x4 viewProjMatrix) {
+                                       bool wrapColumns) {
     std::vector<P3> points;
     if (!ReadVerticesFromObj(inPath, points)) {
         std::cerr << "[Tri] ERROR: failed to read vertices from " << inPath << '\n';
@@ -223,32 +220,6 @@ bool CGALTriangulator::TriangulateVertexOnlyEllipsoidOBJ(const std::string& inPa
             return false;
         }
         // Already triangles; no need to call triangulate_faces again.
-    }
-
-    if (applyScreenFlips) {
-        ssflip::Params p;
-        p.framebufferWidth  = frameBuffer.x;
-        p.framebufferHeight = frameBuffer.y;
-        p.tileWidth         = 32;
-        p.tileHeight        = 32;
-        p.minTriAreaPx      = 0.5;
-        p.maxDihedralDeg    = 6.0;
-        p.minGain           = 1.0;
-
-        auto projector = [&](const P3& pt, ssflip::V2& px){
-            return projectToPixel(pt, px, viewProjMatrix, frameBuffer); // the projector shown earlier
-        };
-
-        constexpr int maxFlipIters = 1000;
-        for (int iter = 0; iter < std::max(1, maxFlipIters); ++iter) {
-            ssflip::Stats s = ssflip::flipPass(mesh, projector, p);
-            // printf("[FlipPass] iter=%d visited=%zu kept=%zu applied=%zu\n",
-            //        iter, s.edgesVisited, s.candidatesKept, s.flipsApplied);
-            if (s.flipsApplied == 0) break; // converged
-        }
-
-        // Optional: re-validate
-        // if (!CGAL::is_valid_polygon_mesh(mesh)) { /* handle */ }
     }
 
     if (!CGAL::is_valid_polygon_mesh(mesh)) {

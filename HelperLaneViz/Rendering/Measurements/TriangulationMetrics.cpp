@@ -72,4 +72,53 @@ void printEdgeAndTileMetrics(const std::vector<Vertex>& V_mwt,
            m.triangleCount, ts.x, ts.y);
 }
 
+double GetCumulativeEdgeLength2D(const std::vector<Vertex>& V,
+                                 const std::vector<uint32_t>& I) {
+    std::unordered_set<uint64_t> edges;
+    edges.reserve(I.size());
+
+    auto key = [](uint32_t a, uint32_t b) -> uint64_t {
+        if (a > b) std::swap(a, b);
+        return (uint64_t(a) << 32) | uint64_t(b);
+    };
+
+    const size_t T = I.size() / 3;
+    for (size_t t = 0; t < T; ++t) {
+        uint32_t i0 = I[3*t+0], i1 = I[3*t+1], i2 = I[3*t+2];
+        edges.insert(key(i0, i1));
+        edges.insert(key(i1, i2));
+        edges.insert(key(i2, i0));
+    }
+
+    double sum = 0.0;
+    for (uint64_t k : edges) {
+        uint32_t a = uint32_t(k >> 32), b = uint32_t(k & 0xffffffffu);
+        const auto& A = V[a].position;
+        const auto& B = V[b].position;
+        const double dx = double(B.x - A.x);
+        const double dy = double(B.y - A.y);
+        sum += std::sqrt(dx*dx + dy*dy);
+    }
+    return sum;
+}
+
+void Print2DMeshMetrics(const std::vector<Vertex>& V,
+                        const std::vector<uint32_t>& I,
+                        simd_int2 framebufferPx,
+                        simd_int2 tileSizePx)
+{
+    const auto triPx = toTrianglesPx(V, I, framebufferPx);
+    const ttm::Metrics m = ttm::computeTileMetrics(triPx, framebufferPx, tileSizePx);
+    const double cumLen = GetCumulativeEdgeLength2D(V, I);
+
+    // TTO  HTP_95  HTP mean  HTP median  SS P95  SS mean  SS median  BCI  cumulatededgelength
+    printf("[2D] TTO=%.0f  HTP_P95=%.1f  HTP_mean=%.1f  HTP_median=%.1f  "
+           "SS_P95=%.1f  SS_mean=%.1f  SS_median=%.1f  BCI=%.3f  cumulatededgelength=%.6f\n",
+           m.totalTilesTouched,
+           m.trianglesPerTileP95,  m.trianglesPerTileMean,  m.trianglesPerTileMedian,
+           m.tilesPerTriangleP95,  m.tilesPerTriangleMean,  m.tilesPerTriangleMedian,
+           m.binningCostIndex,
+           cumLen);
+}
+
 } // namespace TriMetrics
