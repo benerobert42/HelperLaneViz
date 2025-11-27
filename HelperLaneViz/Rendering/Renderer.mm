@@ -51,6 +51,9 @@
     uint32_t _tilesY;
     uint32_t _tileW;
     uint32_t _tileH;
+
+    id<MTLBuffer> _maxCountBuf;
+
 }
 
 - (GridParams)createGridParamsForSegmentCount:(uint32_t)segmentCount
@@ -132,9 +135,9 @@
     // Place geometry at z in [0,1] (your ellipse z is 0, OK with near=0,f ar=10)
     _viewProjection = simd_mul(projMatrix, viewMatrix);
 
-    auto vertices = GeometryFactory::CreateVerticesForEllipse(50, 1.0, 0.5);
+    auto vertices = GeometryFactory::CreateVerticesForEllipse(300, 1.0, 0.5);
     double edgeLength = 0;
-    auto indices = TriangleFactory::CreateMaxAreaTriangulation(vertices, edgeLength);
+    auto indices = TriangleFactory::CreateConvexMWT(vertices, edgeLength);
 
     _vertexBuffer = [_device newBufferWithBytes:vertices.data()
                                          length:vertices.size() * sizeof(Vertex)
@@ -153,17 +156,18 @@
     // 0) Guard: need geometry
     if (!_vertexBuffer || !_indexBuffer) return;
 
+    // 1) Derive tiling from current drawable size
     const uint32_t fbW = (uint32_t)_view.drawableSize.width;
     const uint32_t fbH = (uint32_t)_view.drawableSize.height;
     const uint32_t tilesX = (fbW + _tileW - 1) / _tileW;
     const uint32_t tilesY = (fbH + _tileH - 1) / _tileH;
     const size_t   tileCount = (size_t)tilesX * tilesY;
 
-    // 1) (Re)allocate counts buffer/texture on resize
-    bool needRealloc = (!_tileCounts || tilesX != _tilesX || tilesY != _tilesY);
-
+    // 2) (Re)allocate resources if needed (counts buffer, heat texture, max buffer)
+    const bool needRealloc = (!_tileCounts || tilesX != _tilesX || tilesY != _tilesY);
     if (needRealloc) {
-        _tilesX = tilesX; _tilesY = tilesY;
+        _tilesX = tilesX;
+        _tilesY = tilesY;
 
         _tileCounts = [_device newBufferWithLength:tileCount * sizeof(uint32_t)
                                            options:MTLResourceStorageModeShared];
@@ -175,64 +179,68 @@
                                                            mipmapped:NO];
         td.usage = MTLTextureUsageShaderWrite | MTLTextureUsageShaderRead;
         _countsTex = [_device newTextureWithDescriptor:td];
+
+        if (!_maxCountBuf) {
+            _maxCountBuf = [_device newBufferWithLength:sizeof(uint32_t)
+                                                options:MTLResourceStorageModeShared];
+        }
     }
 
-    // 2) Zero counts (they’re tiny; CPU memset is fine)
+    // 3) Clear counts + max (host-visible, tiny)
     memset(_tileCounts.contents, 0, tileCount * sizeof(uint32_t));
+    *(uint32_t *)_maxCountBuf.contents = 0;
 
-    // 3) Dispatch binTrianglesToTiles  (one thread per triangle)
+    // 4) Dispatch binTrianglesToTiles (one thread per triangle)
     const uint32_t indexCount = (uint32_t)(_indexBuffer.length / sizeof(uint32_t));
-    const uint32_t triCount = (uint32_t)(_indexBuffer.length / sizeof(uint32_t)) / 3;
+    const uint32_t triCount   = indexCount / 3u;
+
     if (triCount > 0) {
         id<MTLComputeCommandEncoder> ce = [cb computeCommandEncoder];
         [ce setComputePipelineState:_binTrianglesPSO];
 
+        // buffers: 0=verts, 1=indices, 2=VPOnly, 3=BinUniforms, 4=tileCounts (atomic), 5=maxBuf (atomic)
         [ce setBuffer:_vertexBuffer offset:0 atIndex:0];
         [ce setBuffer:_indexBuffer  offset:0 atIndex:1];
 
-        // Match your kernel's arg (matrix or FrameConstants)
-        typedef struct { simd_float4x4 viewProjectionMatrix; } OnlyVP;
-        OnlyVP vp = { _viewProjection };
+        // VPOnly and BinUniforms must match your Metal structs (ShaderTypes.h)
+        typedef struct { simd_float4x4 viewProjectionMatrix; } VPOnly;
+        VPOnly vp = { _viewProjection };
         [ce setBytes:&vp length:sizeof(vp) atIndex:2];
 
-        struct BinUniforms { simd_uint2 framebufferPx; simd_uint2 tileSizePx; uint indexCount; } bu = {
+        typedef struct { simd_uint2 framebufferPx; simd_uint2 tileSizePx; uint indexCount; uint _pad; } BinUniforms;
+        BinUniforms bu = {
             .framebufferPx = { fbW, fbH },
             .tileSizePx    = { _tileW, _tileH },
-            .indexCount    = (uint)(_indexBuffer.length / sizeof(uint32_t))
+            .indexCount    = indexCount,
+            ._pad          = 0
         };
         [ce setBytes:&bu length:sizeof(bu) atIndex:3];
 
         [ce setBuffer:_tileCounts offset:0 atIndex:4];
+        [ce setBuffer:_maxCountBuf offset:0 atIndex:5];
 
-        // <<< IMPORTANT: dispatchThreads, not dispatchThreadgroups
-        MTLSize threads = MTLSizeMake(triCount, 1, 1);
-        MTLSize tpg     = MTLSizeMake(64,       1, 1);
+        // thread_position_in_grid expects dispatchThreads
+        const MTLSize threads = MTLSizeMake(triCount, 1, 1);
+        const MTLSize tpg     = MTLSizeMake(64,       1, 1);
         [ce dispatchThreads:threads threadsPerThreadgroup:tpg];
-
         [ce endEncoding];
     }
 
-    // 4) Compute max on CPU (tile array is tiny)
-    uint32_t *ptr = (uint32_t *)_tileCounts.contents;
-    uint32_t maxCount = 0;
-    for (size_t i = 0; i < tileCount; ++i)
-        if (ptr[i] > maxCount) maxCount = ptr[i];
-
-    // 5) Dispatch countsToTexture to bake a normalized heat texture
+    // 5) Bake normalized counts to a texture (GPU reads max from buffer)
     {
         id<MTLComputeCommandEncoder> ce2 = [cb computeCommandEncoder];
         [ce2 setComputePipelineState:_countsToTexturePSO];
 
+        // countsToTexture args: buffer(0)=tileCounts, buffer(1)=tilesWH, buffer(2)=maxBuf, texture(0)=outTex
         simd_uint2 tilesWH = { _tilesX, _tilesY };
-        [ce2 setBuffer:_tileCounts offset:0 atIndex:0];
-        [ce2 setBytes:&tilesWH length:sizeof(tilesWH) atIndex:1];
-        [ce2 setBytes:&maxCount length:sizeof(maxCount) atIndex:2];
+        [ce2 setBuffer:_tileCounts  offset:0 atIndex:0];
+        [ce2 setBytes:&tilesWH      length:sizeof(tilesWH) atIndex:1];
+        [ce2 setBuffer:_maxCountBuf offset:0 atIndex:2];
         [ce2 setTexture:_countsTex atIndex:0];
 
-        MTLSize g = MTLSizeMake(_tilesX, _tilesY, 1);
-        MTLSize t = MTLSizeMake(8, 8, 1);
-        [ce2 dispatchThreads:g threadsPerThreadgroup:t];
-        NSLog(@"tiles %ux%u, maxCount=%u", _tilesX, _tilesY, maxCount);
+        const MTLSize grid = MTLSizeMake(_tilesX, _tilesY, 1);
+        const MTLSize tpg  = MTLSizeMake(8, 8, 1);
+        [ce2 dispatchThreads:grid threadsPerThreadgroup:tpg];
         [ce2 endEncoding];
     }
 }

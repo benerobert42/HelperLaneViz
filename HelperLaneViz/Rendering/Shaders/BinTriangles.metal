@@ -16,12 +16,23 @@ struct BinUniforms {
     uint  indexCount;      // total indices
 };
 
+inline void atomicMax_relaxed(device atomic_uint* addr, uint v) {
+    uint old = atomic_load_explicit(addr, memory_order_relaxed);
+    while (old < v &&
+           !atomic_compare_exchange_weak_explicit(addr, &old, v,
+                                                  memory_order_relaxed,
+                                                  memory_order_relaxed)) {
+        // 'old' is updated with the current value at *addr; loop if still smaller
+    }
+}
+
 kernel void binTrianglesToTiles(
     constant Vertex*      verts      [[ buffer(0) ]],
     constant uint*        indices    [[ buffer(1) ]],
     constant FrameConstants& frame   [[ buffer(2) ]],
     constant BinUniforms& uni        [[ buffer(3) ]],
     device atomic_uint*   tileCounts [[ buffer(4) ]],
+    device atomic_uint*      maxBuf  [[ buffer(5) ]],
     uint triId                        [[ thread_position_in_grid ]])
 {
     // one thread per triangle
@@ -70,23 +81,35 @@ kernel void binTrianglesToTiles(
 
     // Conservative: mark every tile touched by the triangle’s AABB
     for (int ty = ty0; ty <= ty1; ++ty) {
-        uint row = uint(ty) * tilesX;
-        for (int tx = tx0; tx <= tx1; ++tx) {
-            atomic_fetch_add_explicit(&tileCounts[row + uint(tx)], 1u, memory_order_relaxed);
-        }
-    }
+           uint row = uint(ty) * tilesX;
+           for (int tx = tx0; tx <= tx1; ++tx) {
+               uint idx = row + uint(tx);
+               uint old = atomic_fetch_add_explicit(&tileCounts[idx], 1u, memory_order_relaxed);
+               uint val = old + 1u;
+               atomicMax_relaxed(maxBuf, val); // <-- track max
+           }
+       }
 }
 
+// countsToTexture.metal
 kernel void countsToTexture(
     device const uint*  tileCounts   [[ buffer(0) ]],
-    constant uint2&     tilesWH      [[ buffer(1) ]], // {tilesX, tilesY}
-    constant uint&      maxCount     [[ buffer(2) ]], // precomputed or scanned
+    constant uint2&     tilesWH      [[ buffer(1) ]],
+    device const uint*  maxBuf       [[ buffer(2) ]],   // << here
     texture2d<float, access::write> outTex [[ texture(0) ]],
     uint2 tid [[ thread_position_in_grid ]])
 {
     if (tid.x >= tilesWH.x || tid.y >= tilesWH.y) return;
-    uint idx = tid.y * tilesWH.x + tid.x;
-    float v = (maxCount > 0) ? (float(tileCounts[idx]) / float(maxCount)) : 0.0f;
+
+    const uint idx = tid.y * tilesWH.x + tid.x;
+
+    // Read the GPU-updated maximum from the 1-u32 buffer
+    const uint maxCount = maxBuf[0];                   // << and here
+
+    const float v = (maxCount > 0u)
+        ? float(tileCounts[idx]) / float(maxCount)
+        : 0.0f;
+
     outTex.write(float4(v, v, v, 1.0), tid);
 }
 

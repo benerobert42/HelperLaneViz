@@ -23,7 +23,6 @@
     _view.device = MTLCreateSystemDefaultDevice();
 
     _view.autoResizeDrawable = YES;
-    NSScreen *scr = self.view.window.screen ?: NSScreen.mainScreen;
 
     _renderer = [[Renderer alloc] initWithMetalKitView:_view];
     NSAssert(_renderer, @"Renderer failed initialization");

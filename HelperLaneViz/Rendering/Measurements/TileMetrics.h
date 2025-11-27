@@ -23,21 +23,23 @@ struct TrianglePx {
 };
 
 struct Metrics {
-    double totalTilesTouched = 0.0;
+    double totalTilesTouched = 0.0;      // Sum over all triangles of how many tiles each triangle overlaps (Σ tilesPerTriangle[i]).
 
-    double trianglesPerTileP95   = 0.0;
-    double trianglesPerTileMean  = 0.0;
-    double trianglesPerTileMedian= 0.0;
+    double trianglesPerTileP95 = 0.0;    // 95th percentile of “#triangles touching a tile”, over non-empty tiles.
+    double trianglesPerTileMean = 0.0;   // Mean of “#triangles touching a tile”, over non-empty tiles.
+    double trianglesPerTileMedian = 0.0; // Median of “#triangles touching a tile”, over non-empty tiles.
 
-    double tilesPerTriangleP95   = 0.0;
-    double tilesPerTriangleMean  = 0.0;
-    double tilesPerTriangleMedian= 0.0;
+    double tilesPerTriangleP95 = 0.0;    // 95th percentile of “#tiles overlapped by a triangle”, over all triangles.
+    double tilesPerTriangleMean = 0.0;   // Mean of “#tiles overlapped by a triangle”, over all triangles.
+    double tilesPerTriangleMedian = 0.0; // Median of “#tiles overlapped by a triangle”, over all triangles.
 
-    double binningCostIndex      = 0.0;   // totalTilesTouched / (sum(area_px)/tile_area)
+    double binningCostIndex = 0.0;       // Normalized binning cost:
+                                         // totalTilesTouched / (sumAreaPx / tileArea).
+                                         // Roughly: tile overlaps per ideal tile-coverage unit.
 
-    double triangleCount         = 0.0;
-    double nonEmptyTileCount     = 0.0;
-    double sumAreaPx             = 0.0;
+    double triangleCount = 0.0;          // Total number of triangles in the input.
+    double nonEmptyTileCount = 0.0;      // Number of tiles that have at least one triangle touching them.
+    double sumAreaPx = 0.0;              // Sum of triangle areas in pixel space.
 };
 
 // ---- geometry helpers (pixel space) ----
