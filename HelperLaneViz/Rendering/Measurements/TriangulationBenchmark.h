@@ -18,23 +18,16 @@
 // MARK: - Benchmark Frame Executor Protocol (Objective-C)
 // =============================================================================
 
-/// Protocol for objects that can execute benchmark frames.
-/// Must be declared outside C++ namespace.
 @protocol BenchmarkFrameExecutor <NSObject>
 
-/// Prepare geometry for the given scene and triangulation method.
-/// Returns the time taken for triangulation in seconds.
 - (double)prepareSceneWithVertexCount:(int)vertexCount
                         semiMajorAxis:(float)a
                         semiMinorAxis:(float)b
                   triangulationMethod:(int)method
                      instanceGridSize:(uint32_t)gridSize;
 
-/// Execute one frame and return GPU execution time in seconds.
-/// Returns -1 if timing is not available.
 - (double)executeFrameAndMeasureGPUTime;
 
-/// Get current mesh vertices and indices for metric computation
 - (void)getCurrentMeshVertices:(std::vector<Vertex>*)outVertices
                        indices:(std::vector<uint32_t>*)outIndices;
 
@@ -46,7 +39,10 @@
 
 namespace Benchmark {
 
-/// Available triangulation methods to benchmark
+// -----------------------------------------------------------------------------
+// Triangulation Methods
+// -----------------------------------------------------------------------------
+
 enum class TriangulationMethod {
     MinimumWeight,
     CentroidFan,
@@ -56,37 +52,72 @@ enum class TriangulationMethod {
     MinMaxArea,
     ConstrainedDelaunay,
     
-    COUNT  // Number of methods
+    COUNT
 };
 
-/// Returns human-readable name for a triangulation method
 const char* methodName(TriangulationMethod method);
 
-/// Scene configuration for benchmarking
-struct SceneConfig {
-    int vertexCount = 100;
-    float semiMajorAxis = 1.0f;
-    float semiMinorAxis = 0.5f;
-    uint32_t instanceGridSize = 5;
+// -----------------------------------------------------------------------------
+// Shape Types
+// -----------------------------------------------------------------------------
+
+enum class ShapeType {
+    Circle,              // a/b = 1
+    Ellipse_1_2,         // a/b = 1/2 (width = 2 * height)
+    Ellipse_1_10,        // a/b = 1/10 (elongated)
     
-    static SceneConfig ellipse(int verts, float a, float b, uint32_t instances) {
-        return {verts, a, b, instances};
-    }
-    static SceneConfig circle(int verts, float radius, uint32_t instances) {
-        return {verts, radius, radius, instances};
-    }
+    COUNT
 };
 
-/// Benchmark run configuration
+const char* shapeName(ShapeType shape);
+
+/// Get semi-axes for a shape type. Returns (semiMajorAxis, semiMinorAxis).
+/// Shapes are normalized so the larger axis = 1.0
+std::pair<float, float> shapeAxes(ShapeType shape);
+
+// -----------------------------------------------------------------------------
+// Scene Configuration
+// -----------------------------------------------------------------------------
+
+struct SceneConfig {
+    ShapeType shape = ShapeType::Circle;
+    int vertexCount = 100;
+    uint32_t instanceGridSize = 3;  // NxN grid
+    
+    // Computed from shape type
+    float semiMajorAxis() const;
+    float semiMinorAxis() const;
+    
+    // Total instances
+    uint32_t totalInstances() const { return instanceGridSize * instanceGridSize; }
+    
+    // Human-readable description
+    std::string description() const;
+};
+
+// -----------------------------------------------------------------------------
+// Benchmark Configuration
+// -----------------------------------------------------------------------------
+
 struct BenchmarkConfig {
     std::vector<SceneConfig> scenes;
     int warmupFrames = 10;
     int measureFrames = 100;
     simd_int2 framebufferSize = {1920, 1080};
     uint32_t tileSize = 32;
+    
+    /// Generate the standard test matrix:
+    /// 3 shapes × 4 vertex counts × 3 instance counts = 36 scenes
+    static BenchmarkConfig standardTestMatrix();
+    
+    /// Generate a quick test with fewer combinations
+    static BenchmarkConfig quickTest();
 };
 
-/// Results for a single triangulation method on a single scene
+// -----------------------------------------------------------------------------
+// Results
+// -----------------------------------------------------------------------------
+
 struct MethodResult {
     TriangulationMethod method;
     TriangulationMetrics::MeshMetrics meshMetrics;
@@ -98,22 +129,24 @@ struct MethodResult {
     double triangulationTimeMs = 0.0;
 };
 
-/// Results for a single scene across all triangulation methods
 struct SceneResult {
     SceneConfig config;
     std::vector<MethodResult> methodResults;
 };
 
-/// Complete benchmark results
 struct BenchmarkResults {
     BenchmarkConfig config;
     std::vector<SceneResult> sceneResults;
     
     void printSummary() const;
+    void printDetailedReport() const;
     std::string toCSV() const;
 };
 
-/// Runs the complete benchmark suite
+// -----------------------------------------------------------------------------
+// Benchmark Runner
+// -----------------------------------------------------------------------------
+
 BenchmarkResults runBenchmark(id<BenchmarkFrameExecutor> executor,
                               const BenchmarkConfig& config);
 

@@ -190,8 +190,8 @@ typedef NS_ENUM(NSInteger, TriangulationMethod) {
     // Configure orthographic projection for 2D viewing
     [self setupOrthographicProjection];
     
-    // Configure instancing grid
-    [self setupInstanceGridWithSize:gridSize origin:simd_make_float2(-0.7f, -0.7f) scale:0.4f];
+    // Configure instancing grid to fill viewport
+    [self setupInstanceGridWithSize:gridSize];
     
     // Print metrics if requested
     if (printMetrics) {
@@ -275,15 +275,40 @@ typedef NS_ENUM(NSInteger, TriangulationMethod) {
     _viewProjectionMatrix = simd_mul(projMatrix, viewMatrix);
 }
 
-- (void)setupInstanceGridWithSize:(uint32_t)gridSize
-                           origin:(simd_float2)origin
-                            scale:(float)scale {
+- (void)setupInstanceGridWithSize:(uint32_t)gridSize {
+    // Fill the viewport with a grid of instances
+    // NDC space is [-1, 1] in both X and Y
+    
+    // Add padding around edges and between instances
+    const float edgePadding = 0.05f;      // 5% padding at edges
+    const float instancePadding = 0.02f;  // 2% padding between instances
+    
+    // Available space after edge padding
+    const float availableWidth = 2.0f - 2.0f * edgePadding;
+    const float availableHeight = 2.0f - 2.0f * edgePadding;
+    
+    // Total padding between instances
+    const float totalGapX = instancePadding * (gridSize - 1);
+    const float totalGapY = instancePadding * (gridSize - 1);
+    
+    // Cell size (including the shape)
+    const float cellWidth = (availableWidth - totalGapX) / gridSize;
+    const float cellHeight = (availableHeight - totalGapY) / gridSize;
+    
+    // Scale factor to fit shape within cell (use smaller dimension for uniform scaling)
+    // Shapes are defined with max extent of 1.0, so scale to fit cell
+    const float shapeScale = std::min(cellWidth, cellHeight) * 0.9f; // 90% of cell for some breathing room
+    
+    // Origin is bottom-left of the grid in NDC
+    const float originX = -1.0f + edgePadding + cellWidth * 0.5f;
+    const float originY = -1.0f + edgePadding + cellHeight * 0.5f;
+    
     _gridParams = (GridParams){
         .cols = gridSize,
         .rows = gridSize,
-        .cellSize = {2.0f / gridSize, 2.0f / gridSize},
-        .origin = origin,
-        .scale = scale
+        .cellSize = {cellWidth + instancePadding, cellHeight + instancePadding},
+        .origin = {originX, originY},
+        .scale = shapeScale
     };
 }
 
@@ -550,32 +575,17 @@ typedef NS_ENUM(NSInteger, TriangulationMethod) {
 // =============================================================================
 
 - (void)runDefaultBenchmark {
-    Benchmark::BenchmarkConfig config;
-    
-    // Test various scene configurations
-    config.scenes = {
-        Benchmark::SceneConfig::ellipse(50, 1.0f, 0.5f, 3),    // Small, few instances
-        Benchmark::SceneConfig::ellipse(100, 1.0f, 0.5f, 5),   // Medium
-        Benchmark::SceneConfig::ellipse(200, 1.0f, 0.5f, 5),   // Larger polygon
-        Benchmark::SceneConfig::ellipse(300, 1.0f, 0.5f, 7),   // Many instances
-        Benchmark::SceneConfig::circle(100, 0.8f, 10),         // Circle, many instances
-    };
-    
-    config.warmupFrames = 10;
-    config.measureFrames = 50;
+    // Use the standard test matrix: 3 shapes × 4 vertex counts × 3 instance counts = 36 scenes
+    Benchmark::BenchmarkConfig config = Benchmark::BenchmarkConfig::standardTestMatrix();
     config.framebufferSize = {(int)_view.drawableSize.width, (int)_view.drawableSize.height};
     config.tileSize = _tileSizePixels;
     
     [self runBenchmarkInternal:config];
 }
 
-- (void)runBenchmarkWithScenes:(const std::vector<Benchmark::SceneConfig>&)scenes
-                  warmupFrames:(int)warmupFrames
-                 measureFrames:(int)measureFrames {
-    Benchmark::BenchmarkConfig config;
-    config.scenes = scenes;
-    config.warmupFrames = warmupFrames;
-    config.measureFrames = measureFrames;
+- (void)runQuickBenchmark {
+    // Reduced test set for quick iteration
+    Benchmark::BenchmarkConfig config = Benchmark::BenchmarkConfig::quickTest();
     config.framebufferSize = {(int)_view.drawableSize.width, (int)_view.drawableSize.height};
     config.tileSize = _tileSizePixels;
     
@@ -583,32 +593,30 @@ typedef NS_ENUM(NSInteger, TriangulationMethod) {
 }
 
 - (void)runBenchmarkInternal:(const Benchmark::BenchmarkConfig&)config {
-    // Pause normal rendering
     _view.paused = YES;
     
-    // Run benchmark
     Benchmark::BenchmarkResults results = Benchmark::runBenchmark(self, config);
     
-    // Print summary
+    // Print summary table
     results.printSummary();
     
-    // Export CSV to temp directory
+    // Print detailed report
+    results.printDetailedReport();
+    
+    // Export CSV
     std::string csv = results.toCSV();
     NSString *csvString = [NSString stringWithUTF8String:csv.c_str()];
     NSString *tempPath = [NSTemporaryDirectory() stringByAppendingPathComponent:@"triangulation_benchmark.csv"];
     [csvString writeToFile:tempPath atomically:YES encoding:NSUTF8StringEncoding error:nil];
     printf("\n📊 CSV exported to: %s\n\n", tempPath.UTF8String);
     
-    // Resume normal rendering with first scene config
-    if (!config.scenes.empty()) {
-        const auto& scene = config.scenes[0];
-        [self setupEllipseWithVertexCount:scene.vertexCount
-                            semiMajorAxis:scene.semiMajorAxis
-                            semiMinorAxis:scene.semiMinorAxis
-                      triangulationMethod:TriangulationMethodMinimumWeight
-                         instanceGridSize:scene.instanceGridSize
-                             printMetrics:NO];
-    }
+    // Restore a default scene
+    [self setupEllipseWithVertexCount:300
+                        semiMajorAxis:1.0f
+                        semiMinorAxis:0.5f
+                  triangulationMethod:TriangulationMethodMinimumWeight
+                     instanceGridSize:3
+                         printMetrics:NO];
     
     _view.paused = NO;
 }
