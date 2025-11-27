@@ -131,7 +131,8 @@ typedef NS_ENUM(NSInteger, TriangulationMethod) {
 }
 
 - (void)setupGridOverlay {
-    _gridOverlay = [[GridOverlay alloc] initWithPSO:_gridOverlayPipeline noDepth:_noDepthState];
+    _gridOverlay = [[GridOverlay alloc] initWithPipelineState:_gridOverlayPipeline
+                                            depthStencilState:_noDepthState];
 }
 
 - (void)setupTileHeatmapPipelines {
@@ -459,17 +460,11 @@ typedef NS_ENUM(NSInteger, TriangulationMethod) {
         .zfar = 1
     };
     [encoder setViewport:viewport];
-    [encoder setCullMode:MTLCullModeNone];
-    [encoder setTriangleFillMode:MTLTriangleFillModeFill];
-    [encoder setDepthStencilState:_noDepthState];
     
-    [encoder setFragmentTexture:_heatmapTexture atIndex:0];
-    [_gridOverlay setCountsTexture:_heatmapTexture
-                            tilesX:_tileCountX
-                            tilesY:_tileCountY
-                             tileW:_tileSizePixels
-                             tileH:_tileSizePixels];
-    [_gridOverlay drawWithEncoder:encoder drawableSize:drawableSize];
+    [_gridOverlay drawWithEncoder:encoder
+                   heatmapTexture:_heatmapTexture
+                         tileSize:_tileSizePixels
+                     drawableSize:drawableSize];
 }
 
 @end

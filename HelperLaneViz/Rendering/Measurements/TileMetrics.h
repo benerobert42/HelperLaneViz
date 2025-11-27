@@ -73,7 +73,10 @@ static inline bool pointInTriangleInclusive(const TrianglePx& tri, simd_int2 p) 
 }
 
 // Conservative triangle–AABB overlap (inclusive box bounds).
+// Uses AABB test + corner-in-triangle test. This is conservative but not exact
+// (misses edge-only intersections, but acceptable for visualization).
 static inline bool triangleOverlapsBox(const TrianglePx& tri, simd_int2 boxMin, simd_int2 boxMax) {
+    // First: quick AABB rejection
     simd_int2 triMin, triMax;
     triangleAabb(tri, triMin, triMax);
 
@@ -82,6 +85,9 @@ static inline bool triangleOverlapsBox(const TrianglePx& tri, simd_int2 boxMin, 
         return false;
     }
 
+    // AABBs overlap - for conservative estimate, this is sufficient
+    // The corner-in-triangle test below catches additional cases but
+    // AABBs overlapping is already a good approximation for tile binning
     const simd_int2 bl = { boxMin.x, boxMin.y };
     const simd_int2 br = { boxMax.x, boxMin.y };
     const simd_int2 tl = { boxMin.x, boxMax.y };
@@ -94,6 +100,9 @@ static inline bool triangleOverlapsBox(const TrianglePx& tri, simd_int2 boxMin, 
         return true;
     }
 
+    // AABBs overlap but no box corner is inside triangle.
+    // For conservative binning, we still count this as overlap since
+    // triangle edges may cross the box. A full SAT test would be more precise.
     return true;
 }
 
