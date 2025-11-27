@@ -13,8 +13,10 @@
 #import "TriangulationMetrics.h"
 #import "../Geometry/GeometryFactory.h"
 #import "../Geometry/Triangulation.h"
+#import "Measurements/TriangulationBenchmark.h"
 
 #import <MetalKit/MetalKit.h>
+#import <mach/mach_time.h>
 
 // =============================================================================
 // MARK: - Constants
@@ -35,6 +37,13 @@ typedef NS_ENUM(NSInteger, TriangulationMethod) {
     TriangulationMethodMinMaxArea,
     TriangulationMethodConstrainedDelaunay
 };
+
+// =============================================================================
+// MARK: - Private Interface
+// =============================================================================
+
+@interface Renderer () <BenchmarkFrameExecutor>
+@end
 
 // =============================================================================
 // MARK: - Implementation
@@ -62,6 +71,10 @@ typedef NS_ENUM(NSInteger, TriangulationMethod) {
     id<MTLBuffer> _vertexBuffer;
     id<MTLBuffer> _indexBuffer;
     
+    // Current mesh data (for benchmarking)
+    std::vector<Vertex> _currentVertices;
+    std::vector<uint32_t> _currentIndices;
+    
     // View state
     vector_uint2 _viewportSize;
     simd_float4x4 _viewProjectionMatrix;
@@ -77,6 +90,10 @@ typedef NS_ENUM(NSInteger, TriangulationMethod) {
     uint32_t _tileCountX;
     uint32_t _tileCountY;
     uint32_t _tileSizePixels;
+    
+    // GPU timing
+    double _lastGPUTime;
+    dispatch_semaphore_t _frameSemaphore;
 }
 
 // =============================================================================
@@ -89,6 +106,8 @@ typedef NS_ENUM(NSInteger, TriangulationMethod) {
     _device = mtkView.device;
     _view = mtkView;
     _commandQueue = [_device newCommandQueue];
+    _frameSemaphore = dispatch_semaphore_create(1);
+    _lastGPUTime = -1;
     
     [self setupView];
     [self setupPipelines];
@@ -97,11 +116,11 @@ typedef NS_ENUM(NSInteger, TriangulationMethod) {
     
     // Configure geometry: ellipse with 300 vertices, MWT triangulation, 3x3 grid
     [self setupEllipseWithVertexCount:300
-                           semiMajorAxis:1.0f
-                           semiMinorAxis:0.5f
-                     triangulationMethod:TriangulationMethodMinimumWeight
-                           instanceGridSize:3
-                            printMetrics:YES];
+                        semiMajorAxis:1.0f
+                        semiMinorAxis:0.5f
+                  triangulationMethod:TriangulationMethodMinimumWeight
+                     instanceGridSize:3
+                         printMetrics:YES];
     
     return self;
 }
@@ -156,17 +175,17 @@ typedef NS_ENUM(NSInteger, TriangulationMethod) {
                       semiMajorAxis:(float)a
                       semiMinorAxis:(float)b
                 triangulationMethod:(TriangulationMethod)method
-                  instanceGridSize:(uint32_t)gridSize
+                   instanceGridSize:(uint32_t)gridSize
                        printMetrics:(BOOL)printMetrics {
     
     // Generate ellipse vertices
-    std::vector<Vertex> vertices = GeometryFactory::CreateVerticesForEllipse(vertexCount, a, b);
+    _currentVertices = GeometryFactory::CreateVerticesForEllipse(vertexCount, a, b);
     
     // Triangulate using selected method
-    std::vector<uint32_t> indices = [self triangulateVertices:vertices withMethod:method];
+    _currentIndices = [self triangulateVertices:_currentVertices withMethod:method];
     
     // Upload to GPU
-    [self uploadVertices:vertices indices:indices];
+    [self uploadVertices:_currentVertices indices:_currentIndices];
     
     // Configure orthographic projection for 2D viewing
     [self setupOrthographicProjection];
@@ -178,22 +197,21 @@ typedef NS_ENUM(NSInteger, TriangulationMethod) {
     if (printMetrics) {
         simd_int2 framebufferSize = {(int)_view.drawableSize.width, (int)_view.drawableSize.height};
         simd_int2 tileSize = {(int)_tileSizePixels, (int)_tileSizePixels};
-        TriangulationMetrics::computeAndPrintMeshMetrics(vertices, indices, framebufferSize, tileSize);
+        TriangulationMetrics::computeAndPrintMeshMetrics(_currentVertices, _currentIndices, framebufferSize, tileSize);
     }
 }
 
 - (void)setupCircleWithVertexCount:(int)vertexCount
                             radius:(float)radius
                triangulationMethod:(TriangulationMethod)method
-                 instanceGridSize:(uint32_t)gridSize
+                  instanceGridSize:(uint32_t)gridSize
                       printMetrics:(BOOL)printMetrics {
     
-    // Circle is an ellipse with equal semi-axes
     [self setupEllipseWithVertexCount:vertexCount
                         semiMajorAxis:radius
                         semiMinorAxis:radius
                   triangulationMethod:method
-                    instanceGridSize:gridSize
+                     instanceGridSize:gridSize
                          printMetrics:printMetrics];
 }
 
@@ -282,19 +300,15 @@ typedef NS_ENUM(NSInteger, TriangulationMethod) {
     const uint32_t tilesY = (framebufferHeight + _tileSizePixels - 1) / _tileSizePixels;
     const size_t tileCount = (size_t)tilesX * tilesY;
     
-    // Reallocate resources if tile grid changed
     [self reallocateTileResourcesIfNeededWithTilesX:tilesX tilesY:tilesY tileCount:tileCount];
     
-    // Clear tile counts and max buffer
     memset(_tileCountsBuffer.contents, 0, tileCount * sizeof(uint32_t));
     *(uint32_t *)_maxCountBuffer.contents = 0;
     
-    // Dispatch triangle binning compute pass
     [self dispatchTriangleBinningWithCommandBuffer:commandBuffer
                                   framebufferWidth:framebufferWidth
                                  framebufferHeight:framebufferHeight];
     
-    // Dispatch counts-to-texture compute pass
     [self dispatchCountsToTextureWithCommandBuffer:commandBuffer];
 }
 
@@ -337,15 +351,12 @@ typedef NS_ENUM(NSInteger, TriangulationMethod) {
     id<MTLComputeCommandEncoder> encoder = [commandBuffer computeCommandEncoder];
     [encoder setComputePipelineState:_binTrianglesPipeline];
     
-    // Set buffers
     [encoder setBuffer:_vertexBuffer offset:0 atIndex:0];
     [encoder setBuffer:_indexBuffer offset:0 atIndex:1];
     
-    // Set view-projection matrix
     struct { simd_float4x4 viewProjectionMatrix; } vpUniforms = { _viewProjectionMatrix };
     [encoder setBytes:&vpUniforms length:sizeof(vpUniforms) atIndex:2];
     
-    // Set binning uniforms
     struct {
         simd_uint2 framebufferSize;
         simd_uint2 tileSize;
@@ -362,7 +373,6 @@ typedef NS_ENUM(NSInteger, TriangulationMethod) {
     [encoder setBuffer:_tileCountsBuffer offset:0 atIndex:4];
     [encoder setBuffer:_maxCountBuffer offset:0 atIndex:5];
     
-    // Dispatch one thread per triangle
     [encoder dispatchThreads:MTLSizeMake(triangleCount, 1, 1)
        threadsPerThreadgroup:MTLSizeMake(64, 1, 1)];
     [encoder endEncoding];
@@ -380,7 +390,6 @@ typedef NS_ENUM(NSInteger, TriangulationMethod) {
     [encoder setBuffer:_maxCountBuffer offset:0 atIndex:2];
     [encoder setTexture:_heatmapTexture atIndex:0];
     
-    // Dispatch one thread per tile
     [encoder dispatchThreads:MTLSizeMake(_tileCountX, _tileCountY, 1)
        threadsPerThreadgroup:MTLSizeMake(8, 8, 1)];
     [encoder endEncoding];
@@ -397,7 +406,6 @@ typedef NS_ENUM(NSInteger, TriangulationMethod) {
 - (void)drawInMTKView:(MTKView *)view {
     id<MTLCommandBuffer> commandBuffer = [_commandQueue commandBuffer];
     
-    // Compute tile heatmap
     [self prepareTileHeatmapWithCommandBuffer:commandBuffer];
     
     MTLRenderPassDescriptor *renderPassDescriptor = view.currentRenderPassDescriptor;
@@ -411,10 +419,7 @@ typedef NS_ENUM(NSInteger, TriangulationMethod) {
     
     id<MTLRenderCommandEncoder> encoder = [commandBuffer renderCommandEncoderWithDescriptor:renderPassDescriptor];
     
-    // Draw main geometry
     [self encodeMainGeometryWithEncoder:encoder];
-    
-    // Draw tile heatmap overlay
     [self encodeHeatmapOverlayWithEncoder:encoder drawableSize:view.drawableSize];
     
     [encoder endEncoding];
@@ -465,6 +470,147 @@ typedef NS_ENUM(NSInteger, TriangulationMethod) {
                    heatmapTexture:_heatmapTexture
                          tileSize:_tileSizePixels
                      drawableSize:drawableSize];
+}
+
+// =============================================================================
+// MARK: - BenchmarkFrameExecutor Protocol
+// =============================================================================
+
+- (double)prepareSceneWithVertexCount:(int)vertexCount
+                        semiMajorAxis:(float)a
+                        semiMinorAxis:(float)b
+                  triangulationMethod:(int)method
+                     instanceGridSize:(uint32_t)gridSize {
+    
+    // Measure triangulation time
+    uint64_t startTime = mach_absolute_time();
+    
+    [self setupEllipseWithVertexCount:vertexCount
+                        semiMajorAxis:a
+                        semiMinorAxis:b
+                  triangulationMethod:(TriangulationMethod)method
+                     instanceGridSize:gridSize
+                         printMetrics:NO];
+    
+    uint64_t endTime = mach_absolute_time();
+    
+    // Convert to seconds
+    mach_timebase_info_data_t timebase;
+    mach_timebase_info(&timebase);
+    double nanoseconds = (double)(endTime - startTime) * timebase.numer / timebase.denom;
+    return nanoseconds / 1e9;
+}
+
+- (double)executeFrameAndMeasureGPUTime {
+    __block double gpuTime = -1;
+    
+    id<MTLCommandBuffer> commandBuffer = [_commandQueue commandBuffer];
+    
+    [self prepareTileHeatmapWithCommandBuffer:commandBuffer];
+    
+    MTLRenderPassDescriptor *renderPassDescriptor = _view.currentRenderPassDescriptor;
+    if (!renderPassDescriptor) {
+        [commandBuffer commit];
+        [commandBuffer waitUntilCompleted];
+        return -1;
+    }
+    
+    renderPassDescriptor.tileWidth = _tileSizePixels;
+    renderPassDescriptor.tileHeight = _tileSizePixels;
+    
+    id<MTLRenderCommandEncoder> encoder = [commandBuffer renderCommandEncoderWithDescriptor:renderPassDescriptor];
+    
+    [self encodeMainGeometryWithEncoder:encoder];
+    [self encodeHeatmapOverlayWithEncoder:encoder drawableSize:_view.drawableSize];
+    
+    [encoder endEncoding];
+    [commandBuffer presentDrawable:_view.currentDrawable];
+    
+    // Use GPU timestamps for accurate timing
+    [commandBuffer addCompletedHandler:^(id<MTLCommandBuffer> buffer) {
+        if (buffer.GPUStartTime > 0 && buffer.GPUEndTime > 0) {
+            gpuTime = buffer.GPUEndTime - buffer.GPUStartTime;
+        }
+    }];
+    
+    [commandBuffer commit];
+    [commandBuffer waitUntilCompleted];
+    
+    return gpuTime;
+}
+
+- (void)getCurrentMeshVertices:(std::vector<Vertex>*)outVertices
+                       indices:(std::vector<uint32_t>*)outIndices {
+    if (outVertices) *outVertices = _currentVertices;
+    if (outIndices) *outIndices = _currentIndices;
+}
+
+// =============================================================================
+// MARK: - Benchmark API
+// =============================================================================
+
+- (void)runDefaultBenchmark {
+    Benchmark::BenchmarkConfig config;
+    
+    // Test various scene configurations
+    config.scenes = {
+        Benchmark::SceneConfig::ellipse(50, 1.0f, 0.5f, 3),    // Small, few instances
+        Benchmark::SceneConfig::ellipse(100, 1.0f, 0.5f, 5),   // Medium
+        Benchmark::SceneConfig::ellipse(200, 1.0f, 0.5f, 5),   // Larger polygon
+        Benchmark::SceneConfig::ellipse(300, 1.0f, 0.5f, 7),   // Many instances
+        Benchmark::SceneConfig::circle(100, 0.8f, 10),         // Circle, many instances
+    };
+    
+    config.warmupFrames = 10;
+    config.measureFrames = 50;
+    config.framebufferSize = {(int)_view.drawableSize.width, (int)_view.drawableSize.height};
+    config.tileSize = _tileSizePixels;
+    
+    [self runBenchmarkInternal:config];
+}
+
+- (void)runBenchmarkWithScenes:(const std::vector<Benchmark::SceneConfig>&)scenes
+                  warmupFrames:(int)warmupFrames
+                 measureFrames:(int)measureFrames {
+    Benchmark::BenchmarkConfig config;
+    config.scenes = scenes;
+    config.warmupFrames = warmupFrames;
+    config.measureFrames = measureFrames;
+    config.framebufferSize = {(int)_view.drawableSize.width, (int)_view.drawableSize.height};
+    config.tileSize = _tileSizePixels;
+    
+    [self runBenchmarkInternal:config];
+}
+
+- (void)runBenchmarkInternal:(const Benchmark::BenchmarkConfig&)config {
+    // Pause normal rendering
+    _view.paused = YES;
+    
+    // Run benchmark
+    Benchmark::BenchmarkResults results = Benchmark::runBenchmark(self, config);
+    
+    // Print summary
+    results.printSummary();
+    
+    // Export CSV to temp directory
+    std::string csv = results.toCSV();
+    NSString *csvString = [NSString stringWithUTF8String:csv.c_str()];
+    NSString *tempPath = [NSTemporaryDirectory() stringByAppendingPathComponent:@"triangulation_benchmark.csv"];
+    [csvString writeToFile:tempPath atomically:YES encoding:NSUTF8StringEncoding error:nil];
+    printf("\n📊 CSV exported to: %s\n\n", tempPath.UTF8String);
+    
+    // Resume normal rendering with first scene config
+    if (!config.scenes.empty()) {
+        const auto& scene = config.scenes[0];
+        [self setupEllipseWithVertexCount:scene.vertexCount
+                            semiMajorAxis:scene.semiMajorAxis
+                            semiMinorAxis:scene.semiMinorAxis
+                      triangulationMethod:TriangulationMethodMinimumWeight
+                         instanceGridSize:scene.instanceGridSize
+                             printMetrics:NO];
+    }
+    
+    _view.paused = NO;
 }
 
 @end
