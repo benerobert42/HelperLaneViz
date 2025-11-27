@@ -6,15 +6,12 @@
 //
 #import "Renderer.h"
 #import "ShaderTypes.h"
-#import "AssetLoader.h"
 #import "MathUtilities.h"
 #import "../Geometry/GeometryFactory.h"
 #import "GridOverlay.h"
 #import "PipelineFactory.h"
 #import "TriangulationMetrics.h"
 #import "../Geometry/Triangulation.h"
-
-#import "../Geometry/CGALTriangulator.h"
 
 #import <MetalKit/MetalKit.h>
 
@@ -72,10 +69,6 @@
 - (void)meshTriangulatorHelper {
     std::vector<Vertex> vertices;
     std::vector<uint32_t> indices;
-    AssetLoader::LoadPositionsAndIndicesFromObj(_device,
-                                                @"/Users/robi/Downloads/ellipsoid_oblate_capOutMWT.obj",
-                                                vertices,
-                                                indices);
 
     _vertexBuffer = [_device newBufferWithBytes:vertices.data()
                                          length:vertices.size() * sizeof(Vertex)
@@ -98,20 +91,6 @@
     const auto outPath = std::filesystem::temp_directory_path() / "ellipsoid_oblate_capOutMWTSS.obj";
     std::cerr << "[DBG] temp dir: " << std::filesystem::temp_directory_path() << "\n";
 
-    CGALTriangulator::TriangulateVertexOnlyEllipsoidOBJ("/Users/robi/Downloads/ellipsoid_oblate_cap.obj",
-                                                        outPath,
-                                                        TriangulationMode::MWT,
-                                                        -1, -1, true);
-
-    AssetLoader::LoadPositionsAndIndicesFromObj(_device,
-                                                @"/Users/robi/Downloads/ellipsoid_oblate_cap_lowOutMWT.obj",
-                                                vertsMWT,
-                                                idxMWT);
-
-    AssetLoader::LoadPositionsAndIndicesFromObj(_device,
-                                                @"/Users/robi/Downloads/ellipsoid_oblate_cap_lowOutDel.obj",
-                                                vertsDel,
-                                                idxDel);
 
     simd_int2 framebufferPx = { (int)_view.drawableSize.width, (int)_view.drawableSize.height };
     simd_int2 tileSizePx = { 32, 32 };
