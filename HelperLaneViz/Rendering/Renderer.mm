@@ -84,24 +84,6 @@
 
     simd_float4x4 projMatrix = makePerspective(M_PI_4, 1, 0.1, 40);
     _viewProjection = simd_mul(projMatrix, viewMatrix);
-
-    std::vector<Vertex> vertsMWT, vertsDel;
-    std::vector<uint32_t> idxMWT, idxDel;
-
-    const auto outPath = std::filesystem::temp_directory_path() / "ellipsoid_oblate_capOutMWTSS.obj";
-    std::cerr << "[DBG] temp dir: " << std::filesystem::temp_directory_path() << "\n";
-
-
-    simd_int2 framebufferPx = { (int)_view.drawableSize.width, (int)_view.drawableSize.height };
-    simd_int2 tileSizePx = { 32, 32 };
-
-    TriMetrics::printEdgeAndTileMetrics(vertsMWT,
-                                        idxMWT,
-                                        vertsDel,
-                                        idxDel,
-                                        _viewProjection,
-                                        framebufferPx,
-                                        tileSizePx);
 }
 
 - (void)polygonTriangulatorHelper {
@@ -115,8 +97,8 @@
     _viewProjection = simd_mul(projMatrix, viewMatrix);
 
     auto vertices = GeometryFactory::CreateVerticesForEllipse(300, 1.0, 0.5);
-    double edgeLength = 0;
-    auto indices = TriangleFactory::CreateConvexMWT(vertices, edgeLength);
+    auto triangulationResult = Triangulation::minimumWeightTriangulation(vertices);
+    auto indices = triangulationResult.indices;
 
     _vertexBuffer = [_device newBufferWithBytes:vertices.data()
                                          length:vertices.size() * sizeof(Vertex)
