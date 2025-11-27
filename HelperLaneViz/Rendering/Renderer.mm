@@ -109,7 +109,7 @@
                                        options:MTLResourceStorageModeShared];
 
     simd_int2 framebufferPx = { (int)_view.drawableSize.width, (int)_view.drawableSize.height };
-    TriMetrics::Print2DMeshMetrics(vertices, indices, framebufferPx, simd_int2{32, 32});
+    TriangulationMetrics::computeAndPrintMeshMetrics(vertices, indices, framebufferPx, simd_int2{32, 32});
 }
 
 - (void)prepareTileHeatmapWithCommandBuffer:(id<MTLCommandBuffer>)cb
