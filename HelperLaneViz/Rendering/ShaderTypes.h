@@ -42,5 +42,6 @@ typedef struct {
     float  lineWidth;
     simd_float4 lineColor;
     float  fillAlpha;
+    uint32_t showHeatmap;  // 0 = grid lines only, 1 = heatmap + grid lines
 } GridUniforms;
 #endif

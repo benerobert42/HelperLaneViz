@@ -94,7 +94,14 @@ typedef NS_ENUM(NSInteger, TriangulationMethod) {
     // GPU timing
     double _lastGPUTime;
     dispatch_semaphore_t _frameSemaphore;
+    
+    // Visualization flags
+    BOOL _showGridOverlay;
+    BOOL _showHeatmap;
 }
+
+@synthesize showGridOverlay = _showGridOverlay;
+@synthesize showHeatmap = _showHeatmap;
 
 // =============================================================================
 // MARK: - Initialization
@@ -109,17 +116,21 @@ typedef NS_ENUM(NSInteger, TriangulationMethod) {
     _frameSemaphore = dispatch_semaphore_create(1);
     _lastGPUTime = -1;
     
+    // Default visualization settings
+    _showGridOverlay = YES;
+    _showHeatmap = NO;
+
     [self setupView];
     [self setupPipelines];
     [self setupGridOverlay];
     [self setupTileHeatmapPipelines];
     
     // Configure geometry: ellipse with 300 vertices, MWT triangulation, 3x3 grid
-    [self setupEllipseWithVertexCount:300
+    [self setupEllipseWithVertexCount:500
                         semiMajorAxis:1.0f
                         semiMinorAxis:0.5f
-                  triangulationMethod:TriangulationMethodMinimumWeight
-                     instanceGridSize:3
+                  triangulationMethod:TriangulationMethodStrip
+                     instanceGridSize:10
                          printMetrics:YES];
     
     return self;
@@ -280,9 +291,9 @@ typedef NS_ENUM(NSInteger, TriangulationMethod) {
     // NDC space is [-1, 1] in both X and Y
     
     // Add padding around edges and between instances
-    const float edgePadding = 0.05f;      // 5% padding at edges
-    const float instancePadding = 0.02f;  // 2% padding between instances
-    
+    const float edgePadding = 0.02f;      // 2% padding at edges
+    const float instancePadding = 0.01f;  // 1% padding between instances
+
     // Available space after edge padding
     const float availableWidth = 2.0f - 2.0f * edgePadding;
     const float availableHeight = 2.0f - 2.0f * edgePadding;
@@ -296,8 +307,8 @@ typedef NS_ENUM(NSInteger, TriangulationMethod) {
     const float cellHeight = (availableHeight - totalGapY) / gridSize;
     
     // Scale factor to fit shape within cell (use smaller dimension for uniform scaling)
-    // Shapes are defined with max extent of 1.0, so scale to fit cell
-    const float shapeScale = std::min(cellWidth, cellHeight) * 0.9f; // 90% of cell for some breathing room
+    // Shapes span from -1.0 to +1.0 (diameter = 2.0), so divide by 2 to fit in cell
+    const float shapeScale = std::min(cellWidth, cellHeight) * 0.5f * 0.9f; // 90% of cell for breathing room
     
     // Origin is bottom-left of the grid in NDC
     const float originX = -1.0f + edgePadding + cellWidth * 0.5f;
@@ -431,8 +442,11 @@ typedef NS_ENUM(NSInteger, TriangulationMethod) {
 - (void)drawInMTKView:(MTKView *)view {
     id<MTLCommandBuffer> commandBuffer = [_commandQueue commandBuffer];
     
-    [self prepareTileHeatmapWithCommandBuffer:commandBuffer];
-    
+    // Prepare heatmap if grid overlay with heatmap is enabled
+    if (_showGridOverlay && _showHeatmap) {
+        [self prepareTileHeatmapWithCommandBuffer:commandBuffer];
+    }
+
     MTLRenderPassDescriptor *renderPassDescriptor = view.currentRenderPassDescriptor;
     if (!renderPassDescriptor) {
         [commandBuffer commit];
@@ -445,8 +459,12 @@ typedef NS_ENUM(NSInteger, TriangulationMethod) {
     id<MTLRenderCommandEncoder> encoder = [commandBuffer renderCommandEncoderWithDescriptor:renderPassDescriptor];
     
     [self encodeMainGeometryWithEncoder:encoder];
-    [self encodeHeatmapOverlayWithEncoder:encoder drawableSize:view.drawableSize];
-    
+
+    // Draw grid overlay if enabled
+    if (_showGridOverlay) {
+        [self encodeGridOverlayWithEncoder:encoder drawableSize:view.drawableSize];
+    }
+
     [encoder endEncoding];
     [commandBuffer presentDrawable:view.currentDrawable];
     [commandBuffer commit];
@@ -457,7 +475,7 @@ typedef NS_ENUM(NSInteger, TriangulationMethod) {
     [encoder setDepthStencilState:_depthState];
     [encoder setCullMode:MTLCullModeNone];
     [encoder setTriangleFillMode:MTLTriangleFillModeLines];
-    
+
     FrameConstants frameConstants = {
         .viewProjectionMatrix = _viewProjectionMatrix,
         .viewPortSize = _viewportSize
@@ -478,8 +496,8 @@ typedef NS_ENUM(NSInteger, TriangulationMethod) {
                      instanceCount:instanceCount];
 }
 
-- (void)encodeHeatmapOverlayWithEncoder:(id<MTLRenderCommandEncoder>)encoder
-                           drawableSize:(CGSize)drawableSize {
+- (void)encodeGridOverlayWithEncoder:(id<MTLRenderCommandEncoder>)encoder
+                        drawableSize:(CGSize)drawableSize {
     
     MTLViewport viewport = {
         .originX = 0,
@@ -494,7 +512,8 @@ typedef NS_ENUM(NSInteger, TriangulationMethod) {
     [_gridOverlay drawWithEncoder:encoder
                    heatmapTexture:_heatmapTexture
                          tileSize:_tileSizePixels
-                     drawableSize:drawableSize];
+                     drawableSize:drawableSize
+                      showHeatmap:_showHeatmap];
 }
 
 // =============================================================================
@@ -531,6 +550,7 @@ typedef NS_ENUM(NSInteger, TriangulationMethod) {
     
     id<MTLCommandBuffer> commandBuffer = [_commandQueue commandBuffer];
     
+    // Always prepare and render heatmap during benchmarks
     [self prepareTileHeatmapWithCommandBuffer:commandBuffer];
     
     MTLRenderPassDescriptor *renderPassDescriptor = _view.currentRenderPassDescriptor;
@@ -546,7 +566,22 @@ typedef NS_ENUM(NSInteger, TriangulationMethod) {
     id<MTLRenderCommandEncoder> encoder = [commandBuffer renderCommandEncoderWithDescriptor:renderPassDescriptor];
     
     [self encodeMainGeometryWithEncoder:encoder];
-    [self encodeHeatmapOverlayWithEncoder:encoder drawableSize:_view.drawableSize];
+    
+    // Always render with heatmap during benchmark for consistent measurements
+    MTLViewport viewport = {
+        .originX = 0,
+        .originY = 0,
+        .width = _view.drawableSize.width,
+        .height = _view.drawableSize.height,
+        .znear = 0,
+        .zfar = 1
+    };
+    [encoder setViewport:viewport];
+    [_gridOverlay drawWithEncoder:encoder
+                   heatmapTexture:_heatmapTexture
+                         tileSize:_tileSizePixels
+                     drawableSize:_view.drawableSize
+                      showHeatmap:YES];
     
     [encoder endEncoding];
     [commandBuffer presentDrawable:_view.currentDrawable];

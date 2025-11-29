@@ -61,7 +61,7 @@ static float3 heat(float t) {
 fragment float4 gridFS(
     GridVSOut in [[stage_in]],
     constant GridUniforms& uniforms [[buffer(0)]],
-    texture2d<float> tileCountsTex  [[texture(0)]])      // NEW
+    texture2d<float> tileCountsTex  [[texture(0)]])
 {
     const float2 fragPxF = in.uv * float2(uniforms.framebuffer);
     const uint2  fragPx = uint2(floor(fragPxF));
@@ -69,16 +69,8 @@ fragment float4 gridFS(
         return float4(0.0);
 
     const uint2 tile = max(uniforms.tileSize, uint2(1,1));
-    const uint2 tileId = uint2(fragPx.x / tile.x, fragPx.y / tile.y);
 
-    // sample normalized count (0..1) from the per-tile texture
-    constexpr sampler s(coord::pixel);
-    float tNorm = tileCountsTex.read(tileId).x; // grayscale stored in .x
-
-    // fill color by heatmap + alpha
-    float4 fill = float4(heat(tNorm), uniforms.fillAlpha);
-
-    // Grid lines (your existing logic)
+    // Grid lines
     const uint modX = fragPx.x % tile.x;
     const uint modY = fragPx.y % tile.y;
     const uint distX = min(modX, tile.x - modX);
@@ -87,6 +79,18 @@ fragment float4 gridFS(
     const bool  vLine  = (float(distX) < thresh);
     const bool  hLine  = (float(distY) < thresh);
     float4 line = (vLine || hLine) ? uniforms.lineColor : float4(0.0);
+
+    // If heatmap is disabled, just return grid lines
+    if (uniforms.showHeatmap == 0) {
+        return line;
+    }
+
+    // Heatmap enabled: sample normalized count (0..1) from the per-tile texture
+    const uint2 tileId = uint2(fragPx.x / tile.x, fragPx.y / tile.y);
+    float tNorm = tileCountsTex.read(tileId).x; // grayscale stored in .x
+
+    // fill color by heatmap + alpha
+    float4 fill = float4(heat(tNorm), uniforms.fillAlpha);
 
     // Composite: heat fill under grid lines
     float4 out = fill;
