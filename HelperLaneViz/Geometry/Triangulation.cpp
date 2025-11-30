@@ -17,20 +17,18 @@
 
 namespace Triangulation {
 
-// =============================================================================
 // MARK: - Geometry Helper Functions
-// =============================================================================
 
 namespace {
 
-/// Euclidean distance between two vertices
+// Euclidean distance between two vertices
 inline double edgeLength(const Vertex& vertexA, const Vertex& vertexB) {
     const double deltaX = static_cast<double>(vertexB.position.x) - static_cast<double>(vertexA.position.x);
     const double deltaY = static_cast<double>(vertexB.position.y) - static_cast<double>(vertexA.position.y);
     return std::sqrt(deltaX * deltaX + deltaY * deltaY);
 }
 
-/// Perimeter of a triangle defined by three vertices
+// Perimeter of a triangle defined by three vertices
 inline double trianglePerimeter(const std::vector<Vertex>& vertices,
                                 uint32_t indexA, uint32_t indexB, uint32_t indexC) {
     return edgeLength(vertices[indexA], vertices[indexB])
@@ -38,7 +36,7 @@ inline double trianglePerimeter(const std::vector<Vertex>& vertices,
          + edgeLength(vertices[indexC], vertices[indexA]);
 }
 
-/// Absolute area of a triangle using the cross product formula
+// Absolute area of a triangle using the cross product formula
 inline double triangleArea(const std::vector<Vertex>& vertices,
                            uint32_t indexA, uint32_t indexB, uint32_t indexC) {
     const auto& posA = vertices[indexA].position;
@@ -53,7 +51,7 @@ inline double triangleArea(const std::vector<Vertex>& vertices,
     return std::abs(abX * acY - abY * acX) * 0.5;
 }
 
-/// Signed area of the polygon (positive = CCW, negative = CW)
+// Signed area of the polygon (positive = CCW, negative = CW)
 inline double polygonSignedArea(const std::vector<Vertex>& vertices) {
     const size_t vertexCount = vertices.size();
     double signedAreaSum = 0.0;
@@ -68,7 +66,7 @@ inline double polygonSignedArea(const std::vector<Vertex>& vertices) {
     return 0.5 * signedAreaSum;
 }
 
-/// Check if triangle (A, B, C) has counter-clockwise orientation
+// Check if triangle (A, B, C) has counter-clockwise orientation
 inline bool isCounterClockwise(const std::vector<Vertex>& vertices,
                                uint32_t indexA, uint32_t indexB, uint32_t indexC) {
     const auto& posA = vertices[indexA].position;
@@ -80,7 +78,63 @@ inline bool isCounterClockwise(const std::vector<Vertex>& vertices,
     return crossProduct > 0.0;
 }
 
-/// Build vertex ordering for CCW traversal (reverses if input is CW)
+// Signed cross product of vectors (p1-p0) and (p2-p0)
+inline double cross2D(const simd_float3& p0, const simd_float3& p1, const simd_float3& p2) {
+    return (static_cast<double>(p1.x) - p0.x) * (static_cast<double>(p2.y) - p0.y)
+         - (static_cast<double>(p1.y) - p0.y) * (static_cast<double>(p2.x) - p0.x);
+}
+
+// Check if point P is strictly inside triangle ABC (not on edges)
+inline bool pointInTriangle(const simd_float3& p,
+                            const simd_float3& a, const simd_float3& b, const simd_float3& c) {
+    const double d1 = cross2D(p, a, b);
+    const double d2 = cross2D(p, b, c);
+    const double d3 = cross2D(p, c, a);
+    
+    const bool hasNeg = (d1 < 0) || (d2 < 0) || (d3 < 0);
+    const bool hasPos = (d1 > 0) || (d2 > 0) || (d3 > 0);
+    
+    return !(hasNeg && hasPos);
+}
+
+// Check if an ear (formed by polygon[prev], polygon[curr], polygon[next]) is valid
+// An ear is valid if:
+// 1. It has correct winding (convex at curr vertex for CCW polygon)
+// 2. No other polygon vertices are inside the triangle
+// 3. The diagonal doesn't intersect any polygon edges
+inline bool isValidEar(const std::vector<Vertex>& vertices,
+                       const std::vector<uint32_t>& polygon,
+                       size_t prevIdx, size_t currIdx, size_t nextIdx,
+                       bool polygonIsCCW) {
+    const size_t n = polygon.size();
+    if (n < 3) return false;
+    
+    const auto& pPrev = vertices[polygon[prevIdx]].position;
+    const auto& pCurr = vertices[polygon[currIdx]].position;
+    const auto& pNext = vertices[polygon[nextIdx]].position;
+    
+    // Check winding: for CCW polygon, ear must be CCW (convex vertex)
+    const double cross = cross2D(pPrev, pCurr, pNext);
+    if (polygonIsCCW) {
+        if (cross <= 0) return false; // Reflex vertex, not an ear
+    } else {
+        if (cross >= 0) return false; // For CW polygon, ear must be CW
+    }
+    
+    // Check that no other polygon vertices are inside this triangle
+    for (size_t i = 0; i < n; ++i) {
+        if (i == prevIdx || i == currIdx || i == nextIdx) continue;
+        
+        const auto& testPoint = vertices[polygon[i]].position;
+        if (pointInTriangle(testPoint, pPrev, pCurr, pNext)) {
+            return false;
+        }
+    }
+    
+    return true;
+}
+
+// Build vertex ordering for CCW traversal (reverses if input is CW)
 inline std::vector<uint32_t> buildCCWOrder(const std::vector<Vertex>& vertices) {
     const size_t vertexCount = vertices.size();
     std::vector<uint32_t> order(vertexCount);
@@ -98,9 +152,7 @@ inline std::vector<uint32_t> buildCCWOrder(const std::vector<Vertex>& vertices) 
 
 } // anonymous namespace
 
-// =============================================================================
 // MARK: - Triangulation Implementations
-// =============================================================================
 
 Result minimumWeightTriangulation(const std::vector<Vertex>& vertices) {
     Result result;
@@ -226,81 +278,84 @@ Result greedyMaxAreaTriangulation(const std::vector<Vertex>& vertices) {
         return result;
     }
     
-    // Recursive solver: triangulates a convex sub-polygon by selecting the largest triangle
-    std::function<void(const std::vector<uint32_t>&)> triangulateSubPolygon =
-        [&](const std::vector<uint32_t>& polygon) {
-            const size_t polygonSize = polygon.size();
-            
-            if (polygonSize < 3) return;
-            
-            // Base case: exactly one triangle
-            if (polygonSize == 3) {
-                result.indices.insert(result.indices.end(), {polygon[0], polygon[1], polygon[2]});
-                result.totalEdgeLength += trianglePerimeter(vertices, polygon[0], polygon[1], polygon[2]);
-                return;
-            }
-            
-            // Find the largest-area triangle among all valid triples
-            double largestArea = -1.0;
-            size_t bestI = 0, bestJ = 1, bestK = 2;
-            
-            for (size_t i = 0; i + 2 < polygonSize; ++i) {
-                for (size_t j = i + 1; j + 1 < polygonSize; ++j) {
-                    for (size_t k = j + 1; k < polygonSize; ++k) {
-                        const double area = triangleArea(vertices, polygon[i], polygon[j], polygon[k]);
-                        if (area > largestArea) {
-                            largestArea = area;
-                            bestI = i;
-                            bestJ = j;
-                            bestK = k;
-                        }
-                    }
-                }
-            }
-            
-            // Emit the selected triangle
-            const uint32_t vertexA = polygon[bestI];
-            const uint32_t vertexB = polygon[bestJ];
-            const uint32_t vertexC = polygon[bestK];
-            
-            result.indices.insert(result.indices.end(), {vertexA, vertexB, vertexC});
-            result.totalEdgeLength += trianglePerimeter(vertices, vertexA, vertexB, vertexC);
-            
-            // Build sub-polygons from the arcs between selected vertices
-            auto buildArc = [&](size_t arcStart, size_t arcEnd) -> std::vector<uint32_t> {
-                std::vector<uint32_t> arc;
-                if (arcStart <= arcEnd) {
-                    arc.insert(arc.end(),
-                               polygon.begin() + static_cast<ptrdiff_t>(arcStart),
-                               polygon.begin() + static_cast<ptrdiff_t>(arcEnd + 1));
-                } else {
-                    arc.insert(arc.end(),
-                               polygon.begin() + static_cast<ptrdiff_t>(arcStart),
-                               polygon.end());
-                    arc.insert(arc.end(),
-                               polygon.begin(),
-                               polygon.begin() + static_cast<ptrdiff_t>(arcEnd + 1));
-                }
-                return arc;
-            };
-            
-            // Three arcs: A→B, B→C, C→A (indices are in increasing order)
-            const auto arcAB = buildArc(bestI, bestJ);
-            const auto arcBC = buildArc(bestJ, bestK);
-            const auto arcCA = buildArc(bestK, bestI);
-            
-            // Recurse on arcs with 3+ vertices
-            if (arcAB.size() >= 3) triangulateSubPolygon(arcAB);
-            if (arcBC.size() >= 3) triangulateSubPolygon(arcBC);
-            if (arcCA.size() >= 3) triangulateSubPolygon(arcCA);
-        };
+    // Determine polygon winding
+    const bool polygonIsCCW = polygonSignedArea(vertices) >= 0.0;
     
-    // Initialize with full polygon indices
-    std::vector<uint32_t> fullPolygon(vertexCount);
-    std::iota(fullPolygon.begin(), fullPolygon.end(), 0);
+    // Create mutable polygon (indices into vertices array)
+    std::vector<uint32_t> polygon(vertexCount);
+    std::iota(polygon.begin(), polygon.end(), 0);
     
     result.indices.reserve((vertexCount - 2) * 3);
-    triangulateSubPolygon(fullPolygon);
+    
+    // Ear clipping: repeatedly find the maximum-area valid ear and clip it
+    while (polygon.size() > 3) {
+        const size_t n = polygon.size();
+        
+        double maxArea = -1.0;
+        size_t bestEarIdx = SIZE_MAX;
+        
+        // Find all valid ears and pick the one with maximum area
+        for (size_t i = 0; i < n; ++i) {
+            const size_t prev = (i + n - 1) % n;
+            const size_t next = (i + 1) % n;
+            
+            if (isValidEar(vertices, polygon, prev, i, next, polygonIsCCW)) {
+                const double area = triangleArea(vertices, polygon[prev], polygon[i], polygon[next]);
+                if (area > maxArea) {
+                    maxArea = area;
+                    bestEarIdx = i;
+                }
+            }
+        }
+        
+        // If no valid ear found, polygon may be degenerate - fall back to first valid ear
+        if (bestEarIdx == SIZE_MAX) {
+            for (size_t i = 0; i < n; ++i) {
+                const size_t prev = (i + n - 1) % n;
+                const size_t next = (i + 1) % n;
+                
+                // Relaxed check: just ensure convexity
+                const auto& pPrev = vertices[polygon[prev]].position;
+                const auto& pCurr = vertices[polygon[i]].position;
+                const auto& pNext = vertices[polygon[next]].position;
+                const double cross = cross2D(pPrev, pCurr, pNext);
+                
+                if ((polygonIsCCW && cross > 0) || (!polygonIsCCW && cross < 0)) {
+                    bestEarIdx = i;
+                    break;
+                }
+            }
+        }
+        
+        // Last resort: just pick vertex 0
+        if (bestEarIdx == SIZE_MAX) {
+            bestEarIdx = 0;
+        }
+        
+        // Emit the ear triangle
+        const size_t prev = (bestEarIdx + n - 1) % n;
+        const size_t next = (bestEarIdx + 1) % n;
+        
+        const uint32_t idxA = polygon[prev];
+        const uint32_t idxB = polygon[bestEarIdx];
+        const uint32_t idxC = polygon[next];
+        
+        result.indices.push_back(idxA);
+        result.indices.push_back(idxB);
+        result.indices.push_back(idxC);
+        result.totalEdgeLength += trianglePerimeter(vertices, idxA, idxB, idxC);
+        
+        // Remove the ear tip vertex from polygon
+        polygon.erase(polygon.begin() + static_cast<ptrdiff_t>(bestEarIdx));
+    }
+    
+    // Emit the final triangle
+    if (polygon.size() == 3) {
+        result.indices.push_back(polygon[0]);
+        result.indices.push_back(polygon[1]);
+        result.indices.push_back(polygon[2]);
+        result.totalEdgeLength += trianglePerimeter(vertices, polygon[0], polygon[1], polygon[2]);
+    }
     
     return result;
 }

@@ -161,15 +161,47 @@ SVGLoader::AABB2 ComputeAABB2(const std::vector<Vertex>& vertices)
     }
     return bb;
 }
+
+// Helper: tessellate a single NSVGpath into polygon vertices
+std::vector<simd_float2> TessellatePath(NSVGpath* path, float bezierMaxDeviationPx) {
+    std::vector<simd_float2> poly;
+    
+    const float* pts = path->pts;
+    const int npts = path->npts;
+    if (npts < 4) return poly;
+    
+    simd_float2 p0{pts[0], pts[1]};
+    poly.push_back(p0);
+    
+    for (int i = 1; i + 2 < npts; i += 3) {
+        simd_float2 p1{pts[(i + 0) * 2 + 0], pts[(i + 0) * 2 + 1]};
+        simd_float2 p2{pts[(i + 1) * 2 + 0], pts[(i + 1) * 2 + 1]};
+        simd_float2 p3{pts[(i + 2) * 2 + 0], pts[(i + 2) * 2 + 1]};
+        SampleCubicBezier(p0, p1, p2, p3, bezierMaxDeviationPx, poly);
+        p0 = p3;
+    }
+    
+    // Deduplicate last == first
+    if (poly.size() > 1) {
+        const simd_float2& a = poly.front();
+        const simd_float2& b = poly.back();
+        if (std::fabs(a.x - b.x) < 1e-6f && std::fabs(a.y - b.y) < 1e-6f) {
+            poly.pop_back();
+        }
+    }
+    
+    return poly;
+}
 }
 
-// Main entry: loads an SVG, tessellates each closed path into triangles by
-// sampling Bézier curves into polylines and ear-clipping them.
-// Outputs packed 2D positions (x,y) and 32-bit indices.
+// Main entry: loads an SVG, tessellates each closed path into polylines.
+// If triangulate=true, also performs ear-clipping triangulation.
+// Outputs packed 2D positions (x,y) and 32-bit indices (empty if triangulate=false).
 bool SVGLoader::TessellateSvgToMesh(const std::string& filePath,
                                     std::vector<Vertex>& outPositions,
                                     std::vector<uint32_t>& outIndices,
-                                    float bezierMaxDeviationPx)
+                                    float bezierMaxDeviationPx,
+                                    bool triangulate)
 {
     outPositions.clear();
     outIndices.clear();
@@ -180,105 +212,64 @@ bool SVGLoader::TessellateSvgToMesh(const std::string& filePath,
         return false;
     }
 
-    std::ifstream in(filePath, std::ios::in | std::ios::binary);
-    if (!in) {
-        fprintf(stderr, "Cannot open SVG for read: %s\n", filePath.c_str());
-        return false;
-    }
-
-    std::ostringstream ss;
-    ss << in.rdbuf();
-    std::string svgText = ss.str();
-    if (svgText.empty()) {
-        fprintf(stderr, "Empty SVG file: %s\n", filePath.c_str());
-        return false;
-    }
-
     NSVGimage* image = nsvgParseFromFile(filePath.c_str(), "px", 96.0f);
     if (!image) {
+        fprintf(stderr, "Failed to parse SVG: %s\n", filePath.c_str());
         return false;
     }
 
     // We build one big mesh by concatenating path meshes.
-    // Keep a running base vertex.
     uint32_t baseVertex = 0;
 
     for (NSVGshape* shape = image->shapes; shape != nullptr; shape = shape->next) {
-        // Skip invisible shapes (optional)
         if ((shape->flags & NSVG_FLAGS_VISIBLE) == 0) continue;
 
         for (NSVGpath* path = shape->paths; path != nullptr; path = path->next) {
-            if (!path->closed) continue; // skip open polylines for fill tessellation
+            if (!path->closed) continue;
 
-            // 1) Sample the path (cubic Béziers) to a polyline.
-            std::vector<simd_float2> poly;
-
-            // Path format: points are stored as [x,y] pairs.
-            // Cubic Bézier segments: every 3 points after the first form one segment.
-            // Ref: NanoSVG docs
-            const float* pts = path->pts;            // size: path->npts * 2 floats
-            const int npts = path->npts;
-
-            if (npts < 4) {
-                continue; // need at least one cubic (p0 + 3)
-            }
-
-            // First point:
-            simd_float2 p0{pts[0], pts[1]};
-            poly.push_back(p0);
-
-            for (int i = 1; i + 2 < npts; i += 3) {
-                simd_float2 p1{pts[(i + 0) * 2 + 0], pts[(i + 0) * 2 + 1]};
-                simd_float2 p2{pts[(i + 1) * 2 + 0], pts[(i + 1) * 2 + 1]};
-                simd_float2 p3{pts[(i + 2) * 2 + 0], pts[(i + 2) * 2 + 1]};
-
-                // Append samples (p0 is already in poly)
-                SampleCubicBezier(p0, p1, p2, p3, bezierMaxDeviationPx, poly);
-                p0 = p3; // next segment starts here
-            }
-
-            // Deduplicate last == first if closed
-            if (!poly.empty()) {
-                const simd_float2& a = poly.front();
-                const simd_float2& b = poly.back();
-                if (std::fabs(a.x - b.x) < 1e-6f && std::fabs(a.y - b.y) < 1e-6f) {
-                    poly.pop_back();
-                }
-            }
-
+            std::vector<simd_float2> poly = TessellatePath(path, bezierMaxDeviationPx);
             if (poly.size() < 3) continue;
 
-            // 2) Ensure CCW orientation for ear-clipping
+            // Ensure CCW orientation
             if (GetSignedArea(poly) <= 0.0f) {
                 std::reverse(poly.begin(), poly.end());
             }
 
-            // 3) Triangulate this polygon (no holes) with ear-clipping
-            std::vector<uint32_t> local = TriangulateEarClipping(poly);
-            if (local.empty()) continue; // could not triangulate (degenerate)
+            if (triangulate) {
+                // Triangulate this polygon with ear-clipping
+                std::vector<uint32_t> local = TriangulateEarClipping(poly);
+                if (local.empty()) continue;
 
-            // 4) Append to global buffers
-            const uint32_t pathVertexStart = baseVertex;
-            outPositions.reserve(outPositions.size() + poly.size() * 2);
-            for (const simd_float2& v : poly) {
-                Vertex vertex{.position = {v.x, v.y, 1.0}};
-                outPositions.push_back(vertex);
+                // Append to global buffers
+                const uint32_t pathVertexStart = baseVertex;
+                for (const simd_float2& v : poly) {
+                    outPositions.push_back(Vertex{.position = {v.x, v.y, 1.0f}});
+                }
+                for (uint32_t idx : local) {
+                    outIndices.push_back(pathVertexStart + idx);
+                }
+                baseVertex += static_cast<uint32_t>(poly.size());
+            } else {
+                // Just append vertices (no triangulation)
+                for (const simd_float2& v : poly) {
+                    outPositions.push_back(Vertex{.position = {v.x, v.y, 1.0f}});
+                }
             }
-            outIndices.reserve(outIndices.size() + local.size());
-            for (uint32_t idx : local) {
-                outIndices.push_back(pathVertexStart + idx);
-            }
-            baseVertex += static_cast<uint32_t>(poly.size());
         }
     }
 
-    AABB2 boundingBox = ComputeAABB2(outPositions);
-    float bbSize = simd_length(boundingBox.max - boundingBox.min);
-    for (auto& vertex: outPositions) {
-        vertex.position /= bbSize;
+    // Normalize by bounding box
+    if (!outPositions.empty()) {
+        AABB2 boundingBox = ComputeAABB2(outPositions);
+        float bbSize = simd_length(boundingBox.max - boundingBox.min);
+        if (bbSize > 1e-6f) {
+            for (auto& vertex : outPositions) {
+                vertex.position /= bbSize;
+            }
+        }
     }
 
     nsvgDelete(image);
-    return !outPositions.empty() && !outIndices.empty();
+    return !outPositions.empty();
 }
 

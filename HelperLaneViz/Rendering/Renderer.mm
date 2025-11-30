@@ -13,20 +13,13 @@
 #import "TriangulationMetrics.h"
 #import "../Geometry/GeometryFactory.h"
 #import "../Geometry/Triangulation.h"
+#import "../InputHandling/SVGLoader.h"
 #import "Measurements/TriangulationBenchmark.h"
 
 #import <MetalKit/MetalKit.h>
 #import <mach/mach_time.h>
 
-// =============================================================================
-// MARK: - Constants
-// =============================================================================
-
 static constexpr uint32_t kDefaultTileSize = 32;
-
-// =============================================================================
-// MARK: - Triangulation Method Selection
-// =============================================================================
 
 typedef NS_ENUM(NSInteger, TriangulationMethod) {
     TriangulationMethodMinimumWeight,
@@ -38,16 +31,8 @@ typedef NS_ENUM(NSInteger, TriangulationMethod) {
     TriangulationMethodConstrainedDelaunay
 };
 
-// =============================================================================
-// MARK: - Private Interface
-// =============================================================================
-
 @interface Renderer () <BenchmarkFrameExecutor>
 @end
-
-// =============================================================================
-// MARK: - Implementation
-// =============================================================================
 
 @implementation Renderer {
     // Core Metal objects
@@ -57,6 +42,7 @@ typedef NS_ENUM(NSInteger, TriangulationMethod) {
     
     // Render pipelines
     id<MTLRenderPipelineState> _mainPipeline;
+    id<MTLRenderPipelineState> _overdrawPipeline;
     id<MTLRenderPipelineState> _gridOverlayPipeline;
     
     // Depth states
@@ -98,14 +84,14 @@ typedef NS_ENUM(NSInteger, TriangulationMethod) {
     // Visualization flags
     BOOL _showGridOverlay;
     BOOL _showHeatmap;
+    BOOL _showOverdraw;
 }
 
 @synthesize showGridOverlay = _showGridOverlay;
 @synthesize showHeatmap = _showHeatmap;
+@synthesize showOverdraw = _showOverdraw;
 
-// =============================================================================
-// MARK: - Initialization
-// =============================================================================
+// MARK: Initialization
 
 - (instancetype)initWithMetalKitView:(MTKView *)mtkView {
     if (!(self = [super init])) return nil;
@@ -119,20 +105,24 @@ typedef NS_ENUM(NSInteger, TriangulationMethod) {
     // Default visualization settings
     _showGridOverlay = YES;
     _showHeatmap = NO;
+    _showOverdraw = YES;
 
     [self setupView];
     [self setupPipelines];
     [self setupGridOverlay];
     [self setupTileHeatmapPipelines];
     
-    // Configure geometry: ellipse with 300 vertices, MWT triangulation, 3x3 grid
-    [self setupEllipseWithVertexCount:500
-                        semiMajorAxis:1.0f
-                        semiMinorAxis:0.5f
-                  triangulationMethod:TriangulationMethodStrip
-                     instanceGridSize:10
-                         printMetrics:YES];
-    
+//    // Configure geometry: ellipse with 300 vertices, MWT triangulation, 3x3 grid
+//    [self setupEllipseWithVertexCount:500
+//                        semiMajorAxis:1.0f
+//                        semiMinorAxis:0.5f
+//                  triangulationMethod:TriangulationMethodConstrainedDelaunay
+//                     instanceGridSize:10
+//                         printMetrics:YES];
+    [self loadSVGFromPath:@"/Users/robi/Downloads/Tractor2.svg"
+      triangulationMethod:TriangulationMethodCentroidFan
+         instanceGridSize:1];
+
     return self;
 }
 
@@ -152,6 +142,9 @@ typedef NS_ENUM(NSInteger, TriangulationMethod) {
     
     _mainPipeline = MakeMainPipelineState(_device, _view, library, &error);
     NSAssert(_mainPipeline, @"Failed to create main pipeline: %@", error);
+    
+    _overdrawPipeline = MakeOverdrawPipelineState(_device, _view, library, &error);
+    NSAssert(_overdrawPipeline, @"Failed to create overdraw pipeline: %@", error);
     
     _gridOverlayPipeline = MakeGridOverlayPipelineState(_device, _view, library, &error);
     NSAssert(_gridOverlayPipeline, @"Failed to create grid overlay pipeline: %@", error);
@@ -178,9 +171,7 @@ typedef NS_ENUM(NSInteger, TriangulationMethod) {
     NSAssert(_countsToTexturePipeline, @"Failed to create countsToTexture pipeline: %@", error);
 }
 
-// =============================================================================
 // MARK: - Geometry Setup
-// =============================================================================
 
 - (void)setupEllipseWithVertexCount:(int)vertexCount
                       semiMajorAxis:(float)a
@@ -189,22 +180,14 @@ typedef NS_ENUM(NSInteger, TriangulationMethod) {
                    instanceGridSize:(uint32_t)gridSize
                        printMetrics:(BOOL)printMetrics {
     
-    // Generate ellipse vertices
     _currentVertices = GeometryFactory::CreateVerticesForEllipse(vertexCount, a, b);
-    
-    // Triangulate using selected method
     _currentIndices = [self triangulateVertices:_currentVertices withMethod:method];
     
-    // Upload to GPU
     [self uploadVertices:_currentVertices indices:_currentIndices];
     
-    // Configure orthographic projection for 2D viewing
     [self setupOrthographicProjection];
-    
-    // Configure instancing grid to fill viewport
     [self setupInstanceGridWithSize:gridSize];
-    
-    // Print metrics if requested
+
     if (printMetrics) {
         simd_int2 framebufferSize = {(int)_view.drawableSize.width, (int)_view.drawableSize.height};
         simd_int2 tileSize = {(int)_tileSizePixels, (int)_tileSizePixels};
@@ -291,8 +274,8 @@ typedef NS_ENUM(NSInteger, TriangulationMethod) {
     // NDC space is [-1, 1] in both X and Y
     
     // Add padding around edges and between instances
-    const float edgePadding = 0.02f;      // 2% padding at edges
-    const float instancePadding = 0.01f;  // 1% padding between instances
+    const float edgePadding = 0.02f; // 2% padding at edges
+    const float instancePadding = 0.01f; // 1% padding between instances
 
     // Available space after edge padding
     const float availableWidth = 2.0f - 2.0f * edgePadding;
@@ -323,9 +306,7 @@ typedef NS_ENUM(NSInteger, TriangulationMethod) {
     };
 }
 
-// =============================================================================
 // MARK: - Tile Heatmap Computation
-// =============================================================================
 
 - (void)prepareTileHeatmapWithCommandBuffer:(id<MTLCommandBuffer>)commandBuffer {
     if (!_vertexBuffer || !_indexBuffer) return;
@@ -431,9 +412,7 @@ typedef NS_ENUM(NSInteger, TriangulationMethod) {
     [encoder endEncoding];
 }
 
-// =============================================================================
 // MARK: - MTKViewDelegate
-// =============================================================================
 
 - (void)mtkView:(MTKView *)view drawableSizeWillChange:(CGSize)size {
     _viewportSize = (vector_uint2){(uint32_t)size.width, (uint32_t)size.height};
@@ -471,10 +450,17 @@ typedef NS_ENUM(NSInteger, TriangulationMethod) {
 }
 
 - (void)encodeMainGeometryWithEncoder:(id<MTLRenderCommandEncoder>)encoder {
-    [encoder setRenderPipelineState:_mainPipeline];
-    [encoder setDepthStencilState:_depthState];
+    if (_showOverdraw) {
+        // Overdraw visualization: additive blend, no depth, filled triangles
+        [encoder setRenderPipelineState:_overdrawPipeline];
+        [encoder setDepthStencilState:_noDepthState];
+        [encoder setTriangleFillMode:MTLTriangleFillModeFill];
+    } else {
+        [encoder setRenderPipelineState:_mainPipeline];
+        [encoder setDepthStencilState:_depthState];
+        [encoder setTriangleFillMode:MTLTriangleFillModeLines];
+    }
     [encoder setCullMode:MTLCullModeNone];
-    [encoder setTriangleFillMode:MTLTriangleFillModeLines];
 
     FrameConstants frameConstants = {
         .viewProjectionMatrix = _viewProjectionMatrix,
@@ -516,9 +502,7 @@ typedef NS_ENUM(NSInteger, TriangulationMethod) {
                       showHeatmap:_showHeatmap];
 }
 
-// =============================================================================
 // MARK: - BenchmarkFrameExecutor Protocol
-// =============================================================================
 
 - (double)prepareSceneWithVertexCount:(int)vertexCount
                         semiMajorAxis:(float)a
@@ -605,9 +589,7 @@ typedef NS_ENUM(NSInteger, TriangulationMethod) {
     if (outIndices) *outIndices = _currentIndices;
 }
 
-// =============================================================================
 // MARK: - Benchmark API
-// =============================================================================
 
 - (void)runDefaultBenchmark {
     // Use the standard test matrix: 3 shapes × 4 vertex counts × 3 instance counts = 36 scenes
@@ -654,6 +636,47 @@ typedef NS_ENUM(NSInteger, TriangulationMethod) {
                          printMetrics:NO];
     
     _view.paused = NO;
+}
+
+// MARK: - SVG Loading
+
+- (BOOL)loadSVGFromPath:(NSString *)path
+    triangulationMethod:(int)method
+       instanceGridSize:(uint32_t)gridSize {
+    
+    // Tessellate SVG without triangulation (triangulate=false)
+    std::vector<Vertex> vertices;
+    std::vector<uint32_t> unusedIndices;
+    if (!SVGLoader::TessellateSvgToMesh(path.UTF8String, vertices, unusedIndices, 20.0f, false)) {
+        NSLog(@"Failed to load SVG: %@", path);
+        return NO;
+    }
+    
+    if (vertices.size() < 3) {
+        NSLog(@"SVG produced insufficient geometry: %@", path);
+        return NO;
+    }
+    
+    // Re-triangulate with selected method
+    std::vector<uint32_t> indices = [self triangulateVertices:vertices
+                                                   withMethod:(TriangulationMethod)method];
+    
+    if (indices.empty()) {
+        NSLog(@"Triangulation failed for SVG: %@", path);
+        return NO;
+    }
+    
+    _currentVertices = vertices;
+    _currentIndices = indices;
+    
+    [self uploadVertices:vertices indices:indices];
+    [self setupOrthographicProjection];
+    [self setupInstanceGridWithSize:gridSize];
+    
+    NSLog(@"Loaded SVG: %@ (%zu vertices, %zu triangles, method=%d)",
+          path, vertices.size(), indices.size() / 3, method);
+    
+    return YES;
 }
 
 @end

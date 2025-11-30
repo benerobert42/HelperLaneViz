@@ -18,9 +18,11 @@ struct AABB2 {
     simd_float2 max;
 };
 
-
+// Tessellate SVG and optionally triangulate with ear-clipping.
+// If triangulate=false, outIndices will be empty and only vertices are returned.
 bool TessellateSvgToMesh(const std::string& filePath,
                          std::vector<Vertex>& outPositions,
                          std::vector<uint32_t>& outIndices,
-                         float bezierMaxDeviationPx = 20.0f);
+                         float bezierMaxDeviationPx = 20.0f,
+                         bool triangulate = true);
 }
