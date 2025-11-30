@@ -9,14 +9,8 @@
 
 #include <algorithm>
 #include <cmath>
-#include <cstdint>
 #include <simd/simd.h>
-#include <string>
 #include <vector>
-
-#include <filesystem>
-#include <fstream>
-#include <sstream>
 
 #define NANOSVG_IMPLEMENTATION
 #include "nanosvg.h"
@@ -161,13 +155,15 @@ SVGLoader::AABB2 ComputeAABB2(const std::vector<Vertex>& vertices)
     }
     return bb;
 }
+}
 
-// Helper: tessellate a single NSVGpath into polygon vertices
-std::vector<simd_float2> TessellatePath(NSVGpath* path, float bezierMaxDeviationPx) {
+// Tessellate a single NSVGpath into a polygon
+static std::vector<simd_float2> TessellatePath(NSVGpath* path, float bezierMaxDeviation) {
     std::vector<simd_float2> poly;
     
     const float* pts = path->pts;
     const int npts = path->npts;
+    
     if (npts < 4) return poly;
     
     simd_float2 p0{pts[0], pts[1]};
@@ -177,11 +173,11 @@ std::vector<simd_float2> TessellatePath(NSVGpath* path, float bezierMaxDeviation
         simd_float2 p1{pts[(i + 0) * 2 + 0], pts[(i + 0) * 2 + 1]};
         simd_float2 p2{pts[(i + 1) * 2 + 0], pts[(i + 1) * 2 + 1]};
         simd_float2 p3{pts[(i + 2) * 2 + 0], pts[(i + 2) * 2 + 1]};
-        SampleCubicBezier(p0, p1, p2, p3, bezierMaxDeviationPx, poly);
+        SampleCubicBezier(p0, p1, p2, p3, bezierMaxDeviation, poly);
         p0 = p3;
     }
     
-    // Deduplicate last == first
+    // Remove duplicate last vertex if path is closed
     if (poly.size() > 1) {
         const simd_float2& a = poly.front();
         const simd_float2& b = poly.back();
@@ -192,25 +188,16 @@ std::vector<simd_float2> TessellatePath(NSVGpath* path, float bezierMaxDeviation
     
     return poly;
 }
-}
 
-// Main entry: loads an SVG, tessellates each closed path into polylines.
-// If triangulate=true, also performs ear-clipping triangulation.
-// Outputs packed 2D positions (x,y) and 32-bit indices (empty if triangulate=false).
+// Main entry with custom triangulator
 bool SVGLoader::TessellateSvgToMesh(const std::string& filePath,
                                     std::vector<Vertex>& outPositions,
                                     std::vector<uint32_t>& outIndices,
-                                    float bezierMaxDeviationPx,
-                                    bool triangulate)
+                                    Triangulator triangulator,
+                                    float bezierMaxDeviationPx)
 {
     outPositions.clear();
     outIndices.clear();
-
-    namespace fs = std::filesystem;
-    if (!fs::exists(filePath)) {
-        fprintf(stderr, "SVG not found: %s\n", filePath.c_str());
-        return false;
-    }
 
     NSVGimage* image = nsvgParseFromFile(filePath.c_str(), "px", 96.0f);
     if (!image) {
@@ -218,7 +205,6 @@ bool SVGLoader::TessellateSvgToMesh(const std::string& filePath,
         return false;
     }
 
-    // We build one big mesh by concatenating path meshes.
     uint32_t baseVertex = 0;
 
     for (NSVGshape* shape = image->shapes; shape != nullptr; shape = shape->next) {
@@ -235,28 +221,35 @@ bool SVGLoader::TessellateSvgToMesh(const std::string& filePath,
                 std::reverse(poly.begin(), poly.end());
             }
 
-            if (triangulate) {
-                // Triangulate this polygon with ear-clipping
-                std::vector<uint32_t> local = TriangulateEarClipping(poly);
-                if (local.empty()) continue;
-
-                // Append to global buffers
-                const uint32_t pathVertexStart = baseVertex;
-                for (const simd_float2& v : poly) {
-                    outPositions.push_back(Vertex{.position = {v.x, v.y, 1.0f}});
-                }
-                for (uint32_t idx : local) {
-                    outIndices.push_back(pathVertexStart + idx);
-                }
-                baseVertex += static_cast<uint32_t>(poly.size());
-            } else {
-                // Just append vertices (no triangulation)
-                for (const simd_float2& v : poly) {
-                    outPositions.push_back(Vertex{.position = {v.x, v.y, 1.0f}});
-                }
+            // Convert to Vertex array
+            std::vector<Vertex> pathVertices;
+            pathVertices.reserve(poly.size());
+            for (const simd_float2& v : poly) {
+                pathVertices.push_back(Vertex{.position = {v.x, v.y, 1.0f}});
             }
+
+            // Triangulate with provided triangulator
+            std::vector<uint32_t> localIndices = triangulator(pathVertices);
+            
+            // Fallback to ear-clipping if custom triangulator fails
+            if (localIndices.empty()) {
+                localIndices = TriangulateEarClipping(poly);
+            }
+            if (localIndices.empty()) continue;
+
+            // Append to output
+            const uint32_t pathVertexStart = baseVertex;
+            for (const auto& v : pathVertices) {
+                outPositions.push_back(v);
+            }
+            for (uint32_t idx : localIndices) {
+                outIndices.push_back(pathVertexStart + idx);
+            }
+            baseVertex += static_cast<uint32_t>(pathVertices.size());
         }
     }
+
+    nsvgDelete(image);
 
     // Normalize by bounding box
     if (!outPositions.empty()) {
@@ -269,7 +262,24 @@ bool SVGLoader::TessellateSvgToMesh(const std::string& filePath,
         }
     }
 
-    nsvgDelete(image);
-    return !outPositions.empty();
+    return !outPositions.empty() && !outIndices.empty();
+}
+
+// Convenience version using built-in ear-clipping
+bool SVGLoader::TessellateSvgToMesh(const std::string& filePath,
+                                    std::vector<Vertex>& outPositions,
+                                    std::vector<uint32_t>& outIndices,
+                                    float bezierMaxDeviationPx)
+{
+    auto earClipTriangulator = [](std::vector<Vertex>& vertices) -> std::vector<uint32_t> {
+        std::vector<simd_float2> poly;
+        poly.reserve(vertices.size());
+        for (const auto& v : vertices) {
+            poly.push_back(simd_make_float2(v.position.x, v.position.y));
+        }
+        return TriangulateEarClipping(poly);
+    };
+    
+    return TessellateSvgToMesh(filePath, outPositions, outIndices, earClipTriangulator, bezierMaxDeviationPx);
 }
 

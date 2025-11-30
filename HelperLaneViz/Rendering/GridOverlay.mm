@@ -45,7 +45,7 @@
     [encoder setTriangleFillMode:MTLTriangleFillModeFill];
     [encoder setCullMode:MTLCullModeNone];
     if (heatmapTexture) {
-        [encoder setFragmentTexture:heatmapTexture atIndex:0];
+    [encoder setFragmentTexture:heatmapTexture atIndex:0];
     }
     [encoder setFragmentBytes:&uniforms length:sizeof(uniforms) atIndex:0];
     [encoder drawPrimitives:MTLPrimitiveTypeTriangle vertexStart:0 vertexCount:3];

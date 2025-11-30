@@ -20,17 +20,16 @@ struct Result {
     double totalEdgeLength = 0.0;
 };
 
-// MARK: - Convex Polygon Triangulation Methods
+// MARK: - Polygon Triangulation Methods
 
 // Minimum Weight Triangulation using dynamic programming.
 Result minimumWeightTriangulation(const std::vector<Vertex>& vertices);
 
 // Fan triangulation from the centroid.
-// Creates n triangles by connecting each edge to the polygon's center.
 // Note: Modifies vertices by appending the centroid vertex.
 Result centroidFanTriangulation(std::vector<Vertex>& vertices);
 
-// Greedy triangulation selecting largest area triangles first.
+// Greedy triangulation selecting largest area triangles first (ear-clipping based).
 Result greedyMaxAreaTriangulation(const std::vector<Vertex>& vertices);
 
 // Strip triangulation alternating from both ends.
@@ -42,9 +41,7 @@ Result maxMinAreaTriangulation(const std::vector<Vertex>& vertices);
 // Minimizes the maximum triangle area (min-max optimization).
 Result minMaxAreaTriangulation(const std::vector<Vertex>& vertices);
 
-// MARK: - General Polygon Triangulation
-
-// Constrained Delaunay Triangulation for arbitrary simple polygons.
+// Constrained Delaunay Triangulation - handles any simple polygon including concave.
 // Uses libigl's Triangle library wrapper.
 std::vector<uint32_t> constrainedDelaunay(const std::vector<Vertex>& vertices);
 

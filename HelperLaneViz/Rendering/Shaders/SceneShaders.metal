@@ -49,7 +49,6 @@ fragment float4 mainFS(MainVSOut in [[stage_in]]) {
 }
 
 fragment float4 overdrawFS(MainVSOut in [[stage_in]]) {
-    // Additive increment per draw - with additive blending, overlapping pixels accumulate
-    // 0.15 per draw means: 1 draw=dark, 2-3 draws=medium, 6+ draws=saturated
-    return float4(0.15, 0.15, 0.15, 1.0);
+    // Additive white; final intensity depends on the blend state
+    return float4(1.0);
 }

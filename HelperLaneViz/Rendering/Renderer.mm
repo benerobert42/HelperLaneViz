@@ -13,7 +13,6 @@
 #import "TriangulationMetrics.h"
 #import "../Geometry/GeometryFactory.h"
 #import "../Geometry/Triangulation.h"
-#import "../InputHandling/SVGLoader.h"
 #import "Measurements/TriangulationBenchmark.h"
 
 #import <MetalKit/MetalKit.h>
@@ -42,7 +41,6 @@ typedef NS_ENUM(NSInteger, TriangulationMethod) {
     
     // Render pipelines
     id<MTLRenderPipelineState> _mainPipeline;
-    id<MTLRenderPipelineState> _overdrawPipeline;
     id<MTLRenderPipelineState> _gridOverlayPipeline;
     
     // Depth states
@@ -84,12 +82,10 @@ typedef NS_ENUM(NSInteger, TriangulationMethod) {
     // Visualization flags
     BOOL _showGridOverlay;
     BOOL _showHeatmap;
-    BOOL _showOverdraw;
 }
 
 @synthesize showGridOverlay = _showGridOverlay;
 @synthesize showHeatmap = _showHeatmap;
-@synthesize showOverdraw = _showOverdraw;
 
 // MARK: Initialization
 
@@ -105,24 +101,20 @@ typedef NS_ENUM(NSInteger, TriangulationMethod) {
     // Default visualization settings
     _showGridOverlay = YES;
     _showHeatmap = NO;
-    _showOverdraw = YES;
 
     [self setupView];
     [self setupPipelines];
     [self setupGridOverlay];
     [self setupTileHeatmapPipelines];
     
-//    // Configure geometry: ellipse with 300 vertices, MWT triangulation, 3x3 grid
-//    [self setupEllipseWithVertexCount:500
-//                        semiMajorAxis:1.0f
-//                        semiMinorAxis:0.5f
-//                  triangulationMethod:TriangulationMethodConstrainedDelaunay
-//                     instanceGridSize:10
-//                         printMetrics:YES];
-    [self loadSVGFromPath:@"/Users/robi/Downloads/Tractor2.svg"
-      triangulationMethod:TriangulationMethodCentroidFan
-         instanceGridSize:1];
-
+    // Configure geometry: ellipse with 300 vertices, MWT triangulation, 3x3 grid
+    [self setupEllipseWithVertexCount:500
+                        semiMajorAxis:1.0f
+                        semiMinorAxis:0.5f
+                  triangulationMethod:TriangulationMethodConstrainedDelaunay
+                     instanceGridSize:10
+                         printMetrics:YES];
+    
     return self;
 }
 
@@ -142,9 +134,6 @@ typedef NS_ENUM(NSInteger, TriangulationMethod) {
     
     _mainPipeline = MakeMainPipelineState(_device, _view, library, &error);
     NSAssert(_mainPipeline, @"Failed to create main pipeline: %@", error);
-    
-    _overdrawPipeline = MakeOverdrawPipelineState(_device, _view, library, &error);
-    NSAssert(_overdrawPipeline, @"Failed to create overdraw pipeline: %@", error);
     
     _gridOverlayPipeline = MakeGridOverlayPipelineState(_device, _view, library, &error);
     NSAssert(_gridOverlayPipeline, @"Failed to create grid overlay pipeline: %@", error);
@@ -450,17 +439,10 @@ typedef NS_ENUM(NSInteger, TriangulationMethod) {
 }
 
 - (void)encodeMainGeometryWithEncoder:(id<MTLRenderCommandEncoder>)encoder {
-    if (_showOverdraw) {
-        // Overdraw visualization: additive blend, no depth, filled triangles
-        [encoder setRenderPipelineState:_overdrawPipeline];
-        [encoder setDepthStencilState:_noDepthState];
-        [encoder setTriangleFillMode:MTLTriangleFillModeFill];
-    } else {
-        [encoder setRenderPipelineState:_mainPipeline];
-        [encoder setDepthStencilState:_depthState];
-        [encoder setTriangleFillMode:MTLTriangleFillModeLines];
-    }
+    [encoder setRenderPipelineState:_mainPipeline];
+    [encoder setDepthStencilState:_depthState];
     [encoder setCullMode:MTLCullModeNone];
+    [encoder setTriangleFillMode:MTLTriangleFillModeLines];
 
     FrameConstants frameConstants = {
         .viewProjectionMatrix = _viewProjectionMatrix,
@@ -636,47 +618,6 @@ typedef NS_ENUM(NSInteger, TriangulationMethod) {
                          printMetrics:NO];
     
     _view.paused = NO;
-}
-
-// MARK: - SVG Loading
-
-- (BOOL)loadSVGFromPath:(NSString *)path
-    triangulationMethod:(int)method
-       instanceGridSize:(uint32_t)gridSize {
-    
-    // Tessellate SVG without triangulation (triangulate=false)
-    std::vector<Vertex> vertices;
-    std::vector<uint32_t> unusedIndices;
-    if (!SVGLoader::TessellateSvgToMesh(path.UTF8String, vertices, unusedIndices, 20.0f, false)) {
-        NSLog(@"Failed to load SVG: %@", path);
-        return NO;
-    }
-    
-    if (vertices.size() < 3) {
-        NSLog(@"SVG produced insufficient geometry: %@", path);
-        return NO;
-    }
-    
-    // Re-triangulate with selected method
-    std::vector<uint32_t> indices = [self triangulateVertices:vertices
-                                                   withMethod:(TriangulationMethod)method];
-    
-    if (indices.empty()) {
-        NSLog(@"Triangulation failed for SVG: %@", path);
-        return NO;
-    }
-    
-    _currentVertices = vertices;
-    _currentIndices = indices;
-    
-    [self uploadVertices:vertices indices:indices];
-    [self setupOrthographicProjection];
-    [self setupInstanceGridWithSize:gridSize];
-    
-    NSLog(@"Loaded SVG: %@ (%zu vertices, %zu triangles, method=%d)",
-          path, vertices.size(), indices.size() / 3, method);
-    
-    return YES;
 }
 
 @end
