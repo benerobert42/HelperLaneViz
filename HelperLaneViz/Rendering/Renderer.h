@@ -20,7 +20,8 @@ typedef NS_ENUM(NSInteger, TriangulationMethod) {
 @interface Renderer : NSObject <MTKViewDelegate>
 
 @property (nonatomic, assign) BOOL showGridOverlay;
-@property (nonatomic, assign) BOOL showHeatmap; // Only has effect when showGridOverlay is YES
+@property (nonatomic, assign) BOOL showHeatmap;    // Only has effect when showGridOverlay is YES
+@property (nonatomic, assign) BOOL showOverdraw;   // Visualize pixel overdraw (how often each pixel is drawn)
 
 - (nonnull instancetype)initWithMetalKitView:(nonnull MTKView *)mtkView;
 

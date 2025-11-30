@@ -45,4 +45,11 @@ Result minMaxAreaTriangulation(const std::vector<Vertex>& vertices);
 // Uses libigl's Triangle library wrapper.
 std::vector<uint32_t> constrainedDelaunay(const std::vector<Vertex>& vertices);
 
+// CDT with holes support - outer boundary + list of hole boundaries
+// Each hole is a vector of vertices forming a closed loop (CW orientation for holes)
+// Returns indices into the combined vertex array (outer first, then holes in order)
+std::vector<uint32_t> constrainedDelaunayWithHoles(
+    const std::vector<Vertex>& outerBoundary,
+    const std::vector<std::vector<Vertex>>& holes);
+
 } // namespace Triangulation

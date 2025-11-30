@@ -73,10 +73,15 @@ static constexpr uint32_t kDefaultTileSize = 32;
     // Visualization flags
     BOOL _showGridOverlay;
     BOOL _showHeatmap;
+    BOOL _showOverdraw;
+    
+    // Overdraw visualization
+    id<MTLRenderPipelineState> _overdrawPipeline;
 }
 
 @synthesize showGridOverlay = _showGridOverlay;
 @synthesize showHeatmap = _showHeatmap;
+@synthesize showOverdraw = _showOverdraw;
 
 // MARK: Initialization
 
@@ -92,20 +97,24 @@ static constexpr uint32_t kDefaultTileSize = 32;
     // Default visualization settings
     _showGridOverlay = YES;
     _showHeatmap = NO;
+    _showOverdraw = YES;
 
     [self setupView];
     [self setupPipelines];
     [self setupGridOverlay];
     [self setupTileHeatmapPipelines];
     
-    // Configure geometry: ellipse with 300 vertices, MWT triangulation, 3x3 grid
-    [self setupEllipseWithVertexCount:500
-                        semiMajorAxis:1.0f
-                        semiMinorAxis:0.5f
-                  triangulationMethod:TriangulationMethodConstrainedDelaunay
-                     instanceGridSize:10
-                         printMetrics:YES];
-    
+//    // Configure geometry: ellipse with 300 vertices, MWT triangulation, 3x3 grid
+//    [self setupEllipseWithVertexCount:500
+//                        semiMajorAxis:1.0f
+//                        semiMinorAxis:0.5f
+//                  triangulationMethod:TriangulationMethodConstrainedDelaunay
+//                     instanceGridSize:10
+//                         printMetrics:YES];
+    [self loadSVGFromPath:@"/Users/robi/Downloads/Tractor2.svg"
+      triangulationMethod:TriangulationMethodGreedyMaxArea
+         instanceGridSize:1];
+
     return self;
 }
 
@@ -125,6 +134,9 @@ static constexpr uint32_t kDefaultTileSize = 32;
     
     _mainPipeline = MakeMainPipelineState(_device, _view, library, &error);
     NSAssert(_mainPipeline, @"Failed to create main pipeline: %@", error);
+    
+    _overdrawPipeline = MakeOverdrawPipelineState(_device, _view, library, &error);
+    NSAssert(_overdrawPipeline, @"Failed to create overdraw pipeline: %@", error);
     
     _gridOverlayPipeline = MakeGridOverlayPipelineState(_device, _view, library, &error);
     NSAssert(_gridOverlayPipeline, @"Failed to create grid overlay pipeline: %@", error);
@@ -452,10 +464,15 @@ static constexpr uint32_t kDefaultTileSize = 32;
     
     id<MTLRenderCommandEncoder> encoder = [commandBuffer renderCommandEncoderWithDescriptor:renderPassDescriptor];
     
-    [self encodeMainGeometryWithEncoder:encoder];
+    // Choose between overdraw visualization and normal rendering
+    if (_showOverdraw) {
+        [self encodeOverdrawGeometryWithEncoder:encoder];
+    } else {
+        [self encodeMainGeometryWithEncoder:encoder];
+    }
 
-    // Draw grid overlay if enabled
-    if (_showGridOverlay) {
+    // Draw grid overlay if enabled (not shown during overdraw mode)
+    if (_showGridOverlay && !_showOverdraw) {
         [self encodeGridOverlayWithEncoder:encoder drawableSize:view.drawableSize];
     }
 
@@ -469,6 +486,33 @@ static constexpr uint32_t kDefaultTileSize = 32;
     [encoder setDepthStencilState:_depthState];
     [encoder setCullMode:MTLCullModeNone];
     [encoder setTriangleFillMode:MTLTriangleFillModeLines];
+
+    FrameConstants frameConstants = {
+        .viewProjectionMatrix = _viewProjectionMatrix,
+        .viewPortSize = _viewportSize
+    };
+    
+    [encoder setVertexBuffer:_vertexBuffer offset:0 atIndex:VertexInputIndexVertices];
+    [encoder setVertexBytes:&frameConstants length:sizeof(frameConstants) atIndex:VertexInputIndexFrameConstants];
+    [encoder setVertexBytes:&_gridParams length:sizeof(_gridParams) atIndex:VertexInputGridParams];
+    
+    const NSUInteger indexCount = _indexBuffer.length / sizeof(uint32_t);
+    const NSUInteger instanceCount = _gridParams.cols * _gridParams.rows;
+    
+    [encoder drawIndexedPrimitives:MTLPrimitiveTypeTriangle
+                        indexCount:indexCount
+                         indexType:MTLIndexTypeUInt32
+                       indexBuffer:_indexBuffer
+                 indexBufferOffset:0
+                     instanceCount:instanceCount];
+}
+
+- (void)encodeOverdrawGeometryWithEncoder:(id<MTLRenderCommandEncoder>)encoder {
+    // Use overdraw pipeline with additive blending - each triangle adds to pixel brightness
+    [encoder setRenderPipelineState:_overdrawPipeline];
+    [encoder setDepthStencilState:_noDepthState]; // Disable depth test for overdraw
+    [encoder setCullMode:MTLCullModeNone];
+    [encoder setTriangleFillMode:MTLTriangleFillModeFill]; // Always fill for overdraw
 
     FrameConstants frameConstants = {
         .viewProjectionMatrix = _viewProjectionMatrix,

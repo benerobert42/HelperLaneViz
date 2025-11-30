@@ -49,6 +49,8 @@ fragment float4 mainFS(MainVSOut in [[stage_in]]) {
 }
 
 fragment float4 overdrawFS(MainVSOut in [[stage_in]]) {
-    // Additive white; final intensity depends on the blend state
-    return float4(1.0);
+    // Additive overdraw visualization
+    // Each draw adds a small amount - areas drawn multiple times become brighter
+    // Green tint helps distinguish from pure white saturation
+    return float4(0.05, 0.15, 0.05, 1.0);  // Subtle green per draw
 }
