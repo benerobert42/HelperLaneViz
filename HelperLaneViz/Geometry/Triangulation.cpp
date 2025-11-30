@@ -97,6 +97,128 @@ inline bool pointInTriangle(const simd_float3& p,
     return !(hasNeg && hasPos);
 }
 
+// Check if two segments (p1-p2) and (p3-p4) properly intersect (cross each other)
+inline bool segmentsIntersect(const simd_float3& p1, const simd_float3& p2,
+                              const simd_float3& p3, const simd_float3& p4) {
+    const double d1 = cross2D(p3, p4, p1);
+    const double d2 = cross2D(p3, p4, p2);
+    const double d3 = cross2D(p1, p2, p3);
+    const double d4 = cross2D(p1, p2, p4);
+    
+    // Check for proper intersection (segments cross each other)
+    if (((d1 > 0 && d2 < 0) || (d1 < 0 && d2 > 0)) &&
+        ((d3 > 0 && d4 < 0) || (d3 < 0 && d4 > 0))) {
+        return true;
+    }
+    return false;
+}
+
+// Ray casting point-in-polygon test
+inline bool pointInsidePolygon(const simd_float3& p, const std::vector<Vertex>& vertices) {
+    const size_t n = vertices.size();
+    if (n < 3) return false;
+    
+    int crossings = 0;
+    for (size_t i = 0; i < n; ++i) {
+        const auto& a = vertices[i].position;
+        const auto& b = vertices[(i + 1) % n].position;
+        
+        if ((a.y <= p.y && b.y > p.y) || (b.y <= p.y && a.y > p.y)) {
+            float t = (p.y - a.y) / (b.y - a.y);
+            if (p.x < a.x + t * (b.x - a.x)) {
+                crossings++;
+            }
+        }
+    }
+    return (crossings % 2) == 1;
+}
+
+// Check if diagonal from vertex i to vertex j is valid (inside polygon, doesn't cross edges)
+inline bool isDiagonalValid(const std::vector<Vertex>& vertices, int i, int j) {
+    const int n = static_cast<int>(vertices.size());
+    if (n < 3) return false;
+    
+    i = ((i % n) + n) % n;
+    j = ((j % n) + n) % n;
+    
+    if (i == j) return false;
+    
+    // Adjacent vertices are always valid (boundary edges)
+    int diff = std::abs(i - j);
+    if (diff == 1 || diff == n - 1) return true;
+    
+    const auto& pi = vertices[i].position;
+    const auto& pj = vertices[j].position;
+    
+    // Check if diagonal intersects any polygon edge
+    for (int k = 0; k < n; ++k) {
+        int next = (k + 1) % n;
+        if (k == i || k == j || next == i || next == j) continue;
+        
+        const auto& pk = vertices[k].position;
+        const auto& pnext = vertices[next].position;
+        
+        if (segmentsIntersect(pi, pj, pk, pnext)) {
+            return false;
+        }
+    }
+    
+    // Check if midpoint is inside polygon
+    simd_float3 midpoint = {(pi.x + pj.x) * 0.5f, (pi.y + pj.y) * 0.5f, 1.0f};
+    return pointInsidePolygon(midpoint, vertices);
+}
+
+// Validate entire triangulation: no crossing diagonals, all diagonals inside polygon
+inline bool isTriangulationValid(const std::vector<Vertex>& vertices,
+                                  const std::vector<uint32_t>& indices) {
+    const size_t n = vertices.size();
+    if (indices.empty() || indices.size() % 3 != 0) return false;
+    
+    // Collect all triangle edges that are diagonals (not boundary edges)
+    std::vector<std::pair<uint32_t, uint32_t>> diagonals;
+    
+    for (size_t i = 0; i < indices.size(); i += 3) {
+        uint32_t a = indices[i];
+        uint32_t b = indices[i + 1];
+        uint32_t c = indices[i + 2];
+        
+        auto checkEdge = [&](uint32_t v1, uint32_t v2) {
+            if (v1 > v2) std::swap(v1, v2);
+            int diff = static_cast<int>(v2) - static_cast<int>(v1);
+            if (diff == 1 || diff == static_cast<int>(n) - 1) return; // boundary edge
+            diagonals.push_back({v1, v2});
+        };
+        
+        checkEdge(a, b);
+        checkEdge(b, c);
+        checkEdge(c, a);
+    }
+    
+    // Check each diagonal is inside polygon
+    for (const auto& [v1, v2] : diagonals) {
+        if (!isDiagonalValid(vertices, static_cast<int>(v1), static_cast<int>(v2))) {
+            return false;
+        }
+    }
+    
+    // Check no two diagonals cross each other
+    for (size_t i = 0; i < diagonals.size(); ++i) {
+        for (size_t j = i + 1; j < diagonals.size(); ++j) {
+            uint32_t a1 = diagonals[i].first, b1 = diagonals[i].second;
+            uint32_t a2 = diagonals[j].first, b2 = diagonals[j].second;
+            
+            if (a1 == a2 || a1 == b2 || b1 == a2 || b1 == b2) continue;
+            
+            if (segmentsIntersect(vertices[a1].position, vertices[b1].position,
+                                  vertices[a2].position, vertices[b2].position)) {
+                return false;
+            }
+        }
+    }
+    
+    return true;
+}
+
 // Check if an ear (formed by polygon[prev], polygon[curr], polygon[next]) is valid
 // An ear is valid if:
 // 1. It has correct winding (convex at curr vertex for CCW polygon)
@@ -132,6 +254,49 @@ inline bool isValidEar(const std::vector<Vertex>& vertices,
     }
     
     return true;
+}
+
+// Robust ear-clipping triangulation (always produces valid results for simple polygons)
+inline std::vector<uint32_t> robustEarClip(const std::vector<Vertex>& vertices) {
+    const size_t vertexCount = vertices.size();
+    if (vertexCount < 3) return {};
+    
+    const bool polygonIsCCW = polygonSignedArea(vertices) >= 0.0;
+    
+    std::vector<uint32_t> polygon(vertexCount);
+    std::iota(polygon.begin(), polygon.end(), 0);
+    
+    std::vector<uint32_t> indices;
+    indices.reserve((vertexCount - 2) * 3);
+    
+    while (polygon.size() > 3) {
+        const size_t n = polygon.size();
+        bool found = false;
+        
+        for (size_t i = 0; i < n; ++i) {
+            const size_t prev = (i + n - 1) % n;
+            const size_t next = (i + 1) % n;
+            
+            if (isValidEar(vertices, polygon, prev, i, next, polygonIsCCW)) {
+                indices.push_back(polygon[prev]);
+                indices.push_back(polygon[i]);
+                indices.push_back(polygon[next]);
+                polygon.erase(polygon.begin() + static_cast<ptrdiff_t>(i));
+                found = true;
+                break;
+            }
+        }
+        
+        if (!found) break;
+    }
+    
+    if (polygon.size() == 3) {
+        indices.push_back(polygon[0]);
+        indices.push_back(polygon[1]);
+        indices.push_back(polygon[2]);
+    }
+    
+    return indices;
 }
 
 // Build vertex ordering for CCW traversal (reverses if input is CW)
@@ -228,6 +393,13 @@ Result minimumWeightTriangulation(const std::vector<Vertex>& vertices) {
     };
     
     emitTriangles(0, vertexCount - 1);
+    
+    // Validate and fallback to robust ear-clipping if invalid
+    if (!isTriangulationValid(vertices, result.indices)) {
+        result.indices = robustEarClip(vertices);
+        result.totalEdgeLength = 0.0;
+    }
+    
     return result;
 }
 
@@ -265,6 +437,14 @@ Result centroidFanTriangulation(std::vector<Vertex>& vertices) {
         result.indices.push_back(centroidIndex);
         
         result.totalEdgeLength += trianglePerimeter(vertices, i, nextIndex, centroidIndex);
+    }
+    
+    // Validate centroid fan (can fail for complex concave shapes)
+    if (!isTriangulationValid(vertices, result.indices)) {
+        // Remove centroid and fallback
+        vertices.pop_back();
+        result.indices = robustEarClip(vertices);
+        result.totalEdgeLength = 0.0;
     }
     
     return result;
@@ -357,6 +537,12 @@ Result greedyMaxAreaTriangulation(const std::vector<Vertex>& vertices) {
         result.totalEdgeLength += trianglePerimeter(vertices, polygon[0], polygon[1], polygon[2]);
     }
     
+    // Validate and fallback if needed
+    if (!isTriangulationValid(vertices, result.indices)) {
+        result.indices = robustEarClip(vertices);
+        result.totalEdgeLength = 0.0;
+    }
+    
     return result;
 }
 
@@ -402,6 +588,12 @@ Result stripTriangulation(const std::vector<Vertex>& vertices) {
         result.indices.push_back(indexC);
         
         result.totalEdgeLength += trianglePerimeter(vertices, indexA, indexB, indexC);
+    }
+    
+    // Validate strip triangulation (often fails for concave polygons)
+    if (!isTriangulationValid(vertices, result.indices)) {
+        result.indices = robustEarClip(vertices);
+        result.totalEdgeLength = 0.0;
     }
     
     return result;
@@ -492,6 +684,13 @@ Result maxMinAreaTriangulation(const std::vector<Vertex>& vertices) {
     };
     
     emitTriangles(0, vertexCount - 1);
+    
+    // Validate and fallback to robust ear-clipping if invalid
+    if (!isTriangulationValid(vertices, result.indices)) {
+        result.indices = robustEarClip(vertices);
+        result.totalEdgeLength = 0.0;
+    }
+    
     return result;
 }
 
@@ -579,6 +778,13 @@ Result minMaxAreaTriangulation(const std::vector<Vertex>& vertices) {
     };
     
     emitTriangles(0, vertexCount - 1);
+    
+    // Validate and fallback to robust ear-clipping if invalid
+    if (!isTriangulationValid(vertices, result.indices)) {
+        result.indices = robustEarClip(vertices);
+        result.totalEdgeLength = 0.0;
+    }
+    
     return result;
 }
 

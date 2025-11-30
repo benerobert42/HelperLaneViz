@@ -13,22 +13,13 @@
 #import "TriangulationMetrics.h"
 #import "../Geometry/GeometryFactory.h"
 #import "../Geometry/Triangulation.h"
+#import "../InputHandling/SVGLoader.h"
 #import "Measurements/TriangulationBenchmark.h"
 
 #import <MetalKit/MetalKit.h>
 #import <mach/mach_time.h>
 
 static constexpr uint32_t kDefaultTileSize = 32;
-
-typedef NS_ENUM(NSInteger, TriangulationMethod) {
-    TriangulationMethodMinimumWeight,
-    TriangulationMethodCentroidFan,
-    TriangulationMethodGreedyMaxArea,
-    TriangulationMethodStrip,
-    TriangulationMethodMaxMinArea,
-    TriangulationMethodMinMaxArea,
-    TriangulationMethodConstrainedDelaunay
-};
 
 @interface Renderer () <BenchmarkFrameExecutor>
 @end
@@ -196,6 +187,41 @@ typedef NS_ENUM(NSInteger, TriangulationMethod) {
                   triangulationMethod:method
                      instanceGridSize:gridSize
                          printMetrics:printMetrics];
+}
+
+- (BOOL)loadSVGFromPath:(NSString *)path
+    triangulationMethod:(TriangulationMethod)method
+       instanceGridSize:(uint32_t)gridSize {
+    
+    // Create triangulator that uses the selected method
+    SVGLoader::Triangulator triangulator = [self, method](std::vector<Vertex>& verts) -> std::vector<uint32_t> {
+        return [self triangulateVertices:verts withMethod:method];
+    };
+    
+    // Tessellate and triangulate each path with the chosen method
+    std::vector<Vertex> vertices;
+    std::vector<uint32_t> indices;
+    if (!SVGLoader::TessellateSvgToMesh(path.UTF8String, vertices, indices, triangulator, 20.0f)) {
+        NSLog(@"Failed to load SVG: %@", path);
+        return NO;
+    }
+    
+    if (vertices.size() < 3 || indices.empty()) {
+        NSLog(@"SVG produced insufficient geometry: %@", path);
+        return NO;
+    }
+    
+    _currentVertices = vertices;
+    _currentIndices = indices;
+    
+    [self uploadVertices:vertices indices:indices];
+    [self setupOrthographicProjection];
+    [self setupInstanceGridWithSize:gridSize];
+    
+    NSLog(@"Loaded SVG: %@ (%zu vertices, %zu triangles, method=%ld)",
+          path, vertices.size(), indices.size() / 3, (long)method);
+    
+    return YES;
 }
 
 - (std::vector<uint32_t>)triangulateVertices:(std::vector<Vertex>&)vertices
