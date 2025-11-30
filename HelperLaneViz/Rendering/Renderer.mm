@@ -97,18 +97,18 @@ static constexpr uint32_t kDefaultTileSize = 32;
     // Default visualization settings
     _showGridOverlay = YES;
     _showHeatmap = NO;
-    _showOverdraw = YES;
+    _showOverdraw = NO;
 
     [self setupView];
     [self setupPipelines];
     [self setupGridOverlay];
     [self setupTileHeatmapPipelines];
     
-//    // Configure geometry: ellipse with 300 vertices, MWT triangulation, 3x3 grid
-//    [self setupEllipseWithVertexCount:500
+    // Configure geometry: ellipse with 300 vertices, MWT triangulation, 3x3 grid
+//    [self setupEllipseWithVertexCount:20
 //                        semiMajorAxis:1.0f
-//                        semiMinorAxis:0.5f
-//                  triangulationMethod:TriangulationMethodConstrainedDelaunay
+//                        semiMinorAxis:1.0f
+//                  triangulationMethod:TriangulationMethodMinimumWeight
 //                     instanceGridSize:10
 //                         printMetrics:YES];
     [self loadSVGFromPath:@"/Users/robi/Downloads/Tractor2.svg"
