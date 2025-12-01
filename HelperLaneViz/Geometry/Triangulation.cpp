@@ -337,6 +337,24 @@ Result minimumWeightTriangulation(const std::vector<Vertex>& vertices) {
             int optimalSplit = -1;
             
             for (int splitPoint = startIndex + 1; splitPoint < endIndex; ++splitPoint) {
+                // Validate diagonals (boundary edges are always valid)
+                if (!isDiagonalValid(vertices, startIndex, splitPoint)) continue;
+                if (!isDiagonalValid(vertices, splitPoint, endIndex)) continue;
+                
+                // Check no other vertices inside this triangle
+                const auto& pA = vertices[startIndex].position;
+                const auto& pB = vertices[splitPoint].position;
+                const auto& pC = vertices[endIndex].position;
+                bool hasVertexInside = false;
+                for (int v = 0; v < vertexCount; ++v) {
+                    if (v == startIndex || v == splitPoint || v == endIndex) continue;
+                    if (pointInTriangle(vertices[v].position, pA, pB, pC)) {
+                        hasVertexInside = true;
+                        break;
+                    }
+                }
+                if (hasVertexInside) continue;
+                
                 // Cost = left subproblem + right subproblem + new internal edges
                 const double internalEdgeCost = edgeLength(vertices[startIndex], vertices[splitPoint])
                                               + edgeLength(vertices[splitPoint], vertices[endIndex]);
