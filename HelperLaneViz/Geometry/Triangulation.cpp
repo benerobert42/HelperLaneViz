@@ -162,6 +162,26 @@ inline bool isDiagonalValid(const std::vector<Vertex>& vertices, int i, int j) {
     return pointInsidePolygon(midpoint, vertices);
 }
 
+// Check if triangle (i, j, k) is valid: diagonals don't cross edges, no vertices inside
+inline bool isTriangleValidForPolygon(const std::vector<Vertex>& vertices, int i, int j, int k) {
+    if (!isDiagonalValid(vertices, i, j)) return false;
+    if (!isDiagonalValid(vertices, j, k)) return false;
+    if (!isDiagonalValid(vertices, k, i)) return false;
+    
+    const auto& pA = vertices[i].position;
+    const auto& pB = vertices[j].position;
+    const auto& pC = vertices[k].position;
+    
+    const int n = static_cast<int>(vertices.size());
+    for (int v = 0; v < n; ++v) {
+        if (v == i || v == j || v == k) continue;
+        if (pointInTriangle(vertices[v].position, pA, pB, pC)) {
+            return false;
+        }
+    }
+    return true;
+}
+
 // Validate entire triangulation: check for basic validity and crossing edges
 inline bool isTriangulationValid(const std::vector<Vertex>& vertices,
                                   const std::vector<uint32_t>& indices) {
@@ -240,49 +260,6 @@ inline bool isValidEar(const std::vector<Vertex>& vertices,
     return true;
 }
 
-// Robust ear-clipping triangulation (always produces valid results for simple polygons)
-inline std::vector<uint32_t> robustEarClip(const std::vector<Vertex>& vertices) {
-    const size_t vertexCount = vertices.size();
-    if (vertexCount < 3) return {};
-    
-    const bool polygonIsCCW = polygonSignedArea(vertices) >= 0.0;
-    
-    std::vector<uint32_t> polygon(vertexCount);
-    std::iota(polygon.begin(), polygon.end(), 0);
-    
-    std::vector<uint32_t> indices;
-    indices.reserve((vertexCount - 2) * 3);
-    
-    while (polygon.size() > 3) {
-        const size_t n = polygon.size();
-        bool found = false;
-        
-        for (size_t i = 0; i < n; ++i) {
-            const size_t prev = (i + n - 1) % n;
-            const size_t next = (i + 1) % n;
-            
-            if (isValidEar(vertices, polygon, prev, i, next, polygonIsCCW)) {
-                indices.push_back(polygon[prev]);
-                indices.push_back(polygon[i]);
-                indices.push_back(polygon[next]);
-                polygon.erase(polygon.begin() + static_cast<ptrdiff_t>(i));
-                found = true;
-                break;
-            }
-        }
-        
-        if (!found) break;
-    }
-    
-    if (polygon.size() == 3) {
-        indices.push_back(polygon[0]);
-        indices.push_back(polygon[1]);
-        indices.push_back(polygon[2]);
-    }
-    
-    return indices;
-}
-
 // Build vertex ordering for CCW traversal (reverses if input is CW)
 inline std::vector<uint32_t> buildCCWOrder(const std::vector<Vertex>& vertices) {
     const size_t vertexCount = vertices.size();
@@ -337,23 +314,8 @@ Result minimumWeightTriangulation(const std::vector<Vertex>& vertices) {
             int optimalSplit = -1;
             
             for (int splitPoint = startIndex + 1; splitPoint < endIndex; ++splitPoint) {
-                // Validate diagonals (boundary edges are always valid)
-                if (!isDiagonalValid(vertices, startIndex, splitPoint)) continue;
-                if (!isDiagonalValid(vertices, splitPoint, endIndex)) continue;
-                
-                // Check no other vertices inside this triangle
-                const auto& pA = vertices[startIndex].position;
-                const auto& pB = vertices[splitPoint].position;
-                const auto& pC = vertices[endIndex].position;
-                bool hasVertexInside = false;
-                for (int v = 0; v < vertexCount; ++v) {
-                    if (v == startIndex || v == splitPoint || v == endIndex) continue;
-                    if (pointInTriangle(vertices[v].position, pA, pB, pC)) {
-                        hasVertexInside = true;
-                        break;
-                    }
-                }
-                if (hasVertexInside) continue;
+                // Skip invalid triangles
+                if (!isTriangleValidForPolygon(vertices, startIndex, splitPoint, endIndex)) continue;
                 
                 // Cost = left subproblem + right subproblem + new internal edges
                 const double internalEdgeCost = edgeLength(vertices[startIndex], vertices[splitPoint])
@@ -495,32 +457,6 @@ Result greedyMaxAreaTriangulation(const std::vector<Vertex>& vertices) {
         return true;
     };
     
-    // Helper: check if triangle is valid
-    auto isTriangleValid = [&](uint32_t i, uint32_t j, uint32_t k) -> bool {
-        // Check orientation
-        double cross = cross2D(vertices[i].position, vertices[j].position, vertices[k].position);
-        if (isCCW && cross <= 1e-10) return false;
-        if (!isCCW && cross >= -1e-10) return false;
-        
-        // Check no other vertices inside
-        for (size_t m = 0; m < n; ++m) {
-            if (m == i || m == j || m == k) continue;
-            if (pointInTriangle(vertices[m].position, 
-                               vertices[i].position, 
-                               vertices[j].position, 
-                               vertices[k].position)) {
-                return false;
-            }
-        }
-        
-        // Check all edges valid
-        if (!isEdgeValid(i, j)) return false;
-        if (!isEdgeValid(j, k)) return false;
-        if (!isEdgeValid(k, i)) return false;
-        
-        return true;
-    };
-    
     // Greedy: find n-2 triangles
     for (size_t triCount = 0; triCount < n - 2; ++triCount) {
         double maxArea = -1.0;
@@ -535,7 +471,7 @@ Result greedyMaxAreaTriangulation(const std::vector<Vertex>& vertices) {
                     auto triKey = std::make_tuple(i, j, k);
                     if (usedTriangles.count(triKey)) continue;
                     
-                    if (isTriangleValid(i, j, k)) {
+                    if (isTriangleValidForPolygon(vertices, i, j, k)) {
                         double area = triangleArea(vertices, i, j, k);
                         if (area > maxArea) {
                             maxArea = area;
@@ -550,8 +486,6 @@ Result greedyMaxAreaTriangulation(const std::vector<Vertex>& vertices) {
         }
         
         if (!found) {
-            // No valid triangle found - fall back to ear clipping
-            result.indices = robustEarClip(vertices);
             return result;
         }
         
@@ -664,6 +598,9 @@ Result maxMinAreaTriangulation(const std::vector<Vertex>& vertices) {
                 const uint32_t originalB = ccwOrder[splitPoint];
                 const uint32_t originalC = ccwOrder[endIndex];
                 
+                // Skip invalid triangles
+                if (!isTriangleValidForPolygon(vertices, originalA, originalB, originalC)) continue;
+                
                 const double currentTriangleArea = triangleArea(vertices, originalA, originalB, originalC);
                 
                 // Bottleneck = minimum of {left subproblem, right subproblem, this triangle}
@@ -751,6 +688,9 @@ Result minMaxAreaTriangulation(const std::vector<Vertex>& vertices) {
                 const uint32_t originalA = ccwOrder[startIndex];
                 const uint32_t originalB = ccwOrder[splitPoint];
                 const uint32_t originalC = ccwOrder[endIndex];
+                
+                // Skip invalid triangles
+                if (!isTriangleValidForPolygon(vertices, originalA, originalB, originalC)) continue;
                 
                 const double currentTriangleArea = triangleArea(vertices, originalA, originalB, originalC);
                 
