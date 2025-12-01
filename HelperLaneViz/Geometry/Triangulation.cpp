@@ -11,6 +11,8 @@
 #include <limits>
 #include <numeric>
 #include <functional>
+#include <set>
+#include <tuple>
 
 #include <Eigen/Core>
 #include <igl/triangle/triangulate.h>
@@ -23,9 +25,7 @@ namespace {
 
 // Euclidean distance between two vertices
 inline double edgeLength(const Vertex& vertexA, const Vertex& vertexB) {
-    const double deltaX = static_cast<double>(vertexB.position.x) - static_cast<double>(vertexA.position.x);
-    const double deltaY = static_cast<double>(vertexB.position.y) - static_cast<double>(vertexA.position.y);
-    return std::sqrt(deltaX * deltaX + deltaY * deltaY);
+    return simd_distance_squared(vertexB.position, vertexA.position);
 }
 
 // Perimeter of a triangle defined by three vertices
@@ -39,16 +39,10 @@ inline double trianglePerimeter(const std::vector<Vertex>& vertices,
 // Absolute area of a triangle using the cross product formula
 inline double triangleArea(const std::vector<Vertex>& vertices,
                            uint32_t indexA, uint32_t indexB, uint32_t indexC) {
-    const auto& posA = vertices[indexA].position;
-    const auto& posB = vertices[indexB].position;
-    const auto& posC = vertices[indexC].position;
-    
-    const double abX = static_cast<double>(posB.x) - static_cast<double>(posA.x);
-    const double abY = static_cast<double>(posB.y) - static_cast<double>(posA.y);
-    const double acX = static_cast<double>(posC.x) - static_cast<double>(posA.x);
-    const double acY = static_cast<double>(posC.y) - static_cast<double>(posA.y);
-    
-    return std::abs(abX * acY - abY * acX) * 0.5;
+    const simd_float3 ab = vertices[indexB].position - vertices[indexA].position;
+    const simd_float3 ac = vertices[indexC].position - vertices[indexA].position;
+
+    return std::abs(simd_cross(ab, ac).z) * 0.5;
 }
 
 // Signed area of the polygon (positive = CCW, negative = CW)
@@ -384,12 +378,6 @@ Result minimumWeightTriangulation(const std::vector<Vertex>& vertices) {
     
     emitTriangles(0, vertexCount - 1);
     
-    // Validate and fallback to robust ear-clipping if invalid
-    if (!isTriangulationValid(vertices, result.indices)) {
-        result.indices = robustEarClip(vertices);
-        result.totalEdgeLength = 0.0;
-    }
-    
     return result;
 }
 
@@ -429,108 +417,142 @@ Result centroidFanTriangulation(std::vector<Vertex>& vertices) {
         result.totalEdgeLength += trianglePerimeter(vertices, i, nextIndex, centroidIndex);
     }
     
-    // Validate centroid fan (can fail for complex concave shapes)
-    if (!isTriangulationValid(vertices, result.indices)) {
-        // Remove centroid and fallback
-        vertices.pop_back();
-        result.indices = robustEarClip(vertices);
-        result.totalEdgeLength = 0.0;
-    }
-    
     return result;
 }
 
 Result greedyMaxAreaTriangulation(const std::vector<Vertex>& vertices) {
     Result result;
-    const size_t vertexCount = vertices.size();
+    const size_t n = vertices.size();
     
-    if (vertexCount < 3) {
-        return result;
+    if (n < 3) return result;
+    
+    const bool isCCW = polygonSignedArea(vertices) >= 0.0;
+    
+    // Track which edges exist: polygon boundary + added diagonals
+    // Edge stored as (min_idx, max_idx)
+    std::set<std::pair<uint32_t, uint32_t>> edges;
+    
+    // Add polygon boundary edges
+    for (size_t i = 0; i < n; ++i) {
+        uint32_t a = static_cast<uint32_t>(i);
+        uint32_t b = static_cast<uint32_t>((i + 1) % n);
+        if (a > b) std::swap(a, b);
+        edges.insert({a, b});
     }
     
-    // Determine polygon winding
-    const bool polygonIsCCW = polygonSignedArea(vertices) >= 0.0;
+    // Track which triangles we've added
+    std::set<std::tuple<uint32_t, uint32_t, uint32_t>> usedTriangles;
     
-    // Create mutable polygon (indices into vertices array)
-    std::vector<uint32_t> polygon(vertexCount);
-    std::iota(polygon.begin(), polygon.end(), 0);
+    result.indices.reserve((n - 2) * 3);
     
-    result.indices.reserve((vertexCount - 2) * 3);
-    
-    // Ear clipping: repeatedly find the maximum-area valid ear and clip it
-    while (polygon.size() > 3) {
-        const size_t n = polygon.size();
+    // Helper: check if edge exists or can be added (valid diagonal)
+    auto isEdgeValid = [&](uint32_t a, uint32_t b) -> bool {
+        if (a > b) std::swap(a, b);
         
-        double maxArea = -1.0;
-        size_t bestEarIdx = SIZE_MAX;
+        // Already exists - valid
+        if (edges.count({a, b})) return true;
         
-        // Find all valid ears and pick the one with maximum area
-        for (size_t i = 0; i < n; ++i) {
-            const size_t prev = (i + n - 1) % n;
-            const size_t next = (i + 1) % n;
+        const auto& posA = vertices[a].position;
+        const auto& posB = vertices[b].position;
+        
+        // Check diagonal doesn't cross any existing edge
+        for (const auto& edge : edges) {
+            // Skip if shares a vertex
+            if (edge.first == a || edge.first == b || 
+                edge.second == a || edge.second == b) continue;
             
-            if (isValidEar(vertices, polygon, prev, i, next, polygonIsCCW)) {
-                const double area = triangleArea(vertices, polygon[prev], polygon[i], polygon[next]);
-                if (area > maxArea) {
-                    maxArea = area;
-                    bestEarIdx = i;
+            if (segmentsIntersect(posA, posB,
+                                  vertices[edge.first].position,
+                                  vertices[edge.second].position)) {
+                return false;
+            }
+        }
+        
+        // Check midpoint is inside polygon
+        simd_float3 mid = {(posA.x + posB.x) * 0.5f, (posA.y + posB.y) * 0.5f, 1.0f};
+        if (!pointInsidePolygon(mid, vertices)) {
+            return false;
+        }
+        
+        return true;
+    };
+    
+    // Helper: check if triangle is valid
+    auto isTriangleValid = [&](uint32_t i, uint32_t j, uint32_t k) -> bool {
+        // Check orientation
+        double cross = cross2D(vertices[i].position, vertices[j].position, vertices[k].position);
+        if (isCCW && cross <= 1e-10) return false;
+        if (!isCCW && cross >= -1e-10) return false;
+        
+        // Check no other vertices inside
+        for (size_t m = 0; m < n; ++m) {
+            if (m == i || m == j || m == k) continue;
+            if (pointInTriangle(vertices[m].position, 
+                               vertices[i].position, 
+                               vertices[j].position, 
+                               vertices[k].position)) {
+                return false;
+            }
+        }
+        
+        // Check all edges valid
+        if (!isEdgeValid(i, j)) return false;
+        if (!isEdgeValid(j, k)) return false;
+        if (!isEdgeValid(k, i)) return false;
+        
+        return true;
+    };
+    
+    // Greedy: find n-2 triangles
+    for (size_t triCount = 0; triCount < n - 2; ++triCount) {
+        double maxArea = -1.0;
+        uint32_t bestI = 0, bestJ = 0, bestK = 0;
+        bool found = false;
+        
+        // Try ALL combinations of 3 vertices
+        for (uint32_t i = 0; i < n; ++i) {
+            for (uint32_t j = i + 1; j < n; ++j) {
+                for (uint32_t k = j + 1; k < n; ++k) {
+                    // Normalize triangle ordering
+                    auto triKey = std::make_tuple(i, j, k);
+                    if (usedTriangles.count(triKey)) continue;
+                    
+                    if (isTriangleValid(i, j, k)) {
+                        double area = triangleArea(vertices, i, j, k);
+                        if (area > maxArea) {
+                            maxArea = area;
+                            bestI = i;
+                            bestJ = j;
+                            bestK = k;
+                            found = true;
+                        }
+                    }
                 }
             }
         }
         
-        // If no valid ear found, polygon may be degenerate - fall back to first valid ear
-        if (bestEarIdx == SIZE_MAX) {
-            for (size_t i = 0; i < n; ++i) {
-                const size_t prev = (i + n - 1) % n;
-                const size_t next = (i + 1) % n;
-                
-                // Relaxed check: just ensure convexity
-                const auto& pPrev = vertices[polygon[prev]].position;
-                const auto& pCurr = vertices[polygon[i]].position;
-                const auto& pNext = vertices[polygon[next]].position;
-                const double cross = cross2D(pPrev, pCurr, pNext);
-                
-                if ((polygonIsCCW && cross > 0) || (!polygonIsCCW && cross < 0)) {
-                    bestEarIdx = i;
-                    break;
-                }
-            }
+        if (!found) {
+            // No valid triangle found - fall back to ear clipping
+            result.indices = robustEarClip(vertices);
+            return result;
         }
         
-        // Last resort: just pick vertex 0
-        if (bestEarIdx == SIZE_MAX) {
-            bestEarIdx = 0;
-        }
+        // Add the triangle
+        result.indices.push_back(bestI);
+        result.indices.push_back(bestJ);
+        result.indices.push_back(bestK);
+        result.totalEdgeLength += trianglePerimeter(vertices, bestI, bestJ, bestK);
         
-        // Emit the ear triangle
-        const size_t prev = (bestEarIdx + n - 1) % n;
-        const size_t next = (bestEarIdx + 1) % n;
+        usedTriangles.insert(std::make_tuple(bestI, bestJ, bestK));
         
-        const uint32_t idxA = polygon[prev];
-        const uint32_t idxB = polygon[bestEarIdx];
-        const uint32_t idxC = polygon[next];
-        
-        result.indices.push_back(idxA);
-        result.indices.push_back(idxB);
-        result.indices.push_back(idxC);
-        result.totalEdgeLength += trianglePerimeter(vertices, idxA, idxB, idxC);
-        
-        // Remove the ear tip vertex from polygon
-        polygon.erase(polygon.begin() + static_cast<ptrdiff_t>(bestEarIdx));
-    }
-    
-    // Emit the final triangle
-    if (polygon.size() == 3) {
-        result.indices.push_back(polygon[0]);
-        result.indices.push_back(polygon[1]);
-        result.indices.push_back(polygon[2]);
-        result.totalEdgeLength += trianglePerimeter(vertices, polygon[0], polygon[1], polygon[2]);
-    }
-    
-    // Validate and fallback if needed
-    if (!isTriangulationValid(vertices, result.indices)) {
-        result.indices = robustEarClip(vertices);
-        result.totalEdgeLength = 0.0;
+        // Add new edges
+        auto addEdge = [&](uint32_t a, uint32_t b) {
+            if (a > b) std::swap(a, b);
+            edges.insert({a, b});
+        };
+        addEdge(bestI, bestJ);
+        addEdge(bestJ, bestK);
+        addEdge(bestK, bestI);
     }
     
     return result;
@@ -578,12 +600,6 @@ Result stripTriangulation(const std::vector<Vertex>& vertices) {
         result.indices.push_back(indexC);
         
         result.totalEdgeLength += trianglePerimeter(vertices, indexA, indexB, indexC);
-    }
-    
-    // Validate strip triangulation (often fails for concave polygons)
-    if (!isTriangulationValid(vertices, result.indices)) {
-        result.indices = robustEarClip(vertices);
-        result.totalEdgeLength = 0.0;
     }
     
     return result;
@@ -675,12 +691,6 @@ Result maxMinAreaTriangulation(const std::vector<Vertex>& vertices) {
     
     emitTriangles(0, vertexCount - 1);
     
-    // Validate and fallback to robust ear-clipping if invalid
-    if (!isTriangulationValid(vertices, result.indices)) {
-        result.indices = robustEarClip(vertices);
-        result.totalEdgeLength = 0.0;
-    }
-    
     return result;
 }
 
@@ -768,12 +778,6 @@ Result minMaxAreaTriangulation(const std::vector<Vertex>& vertices) {
     };
     
     emitTriangles(0, vertexCount - 1);
-    
-    // Validate and fallback to robust ear-clipping if invalid
-    if (!isTriangulationValid(vertices, result.indices)) {
-        result.indices = robustEarClip(vertices);
-        result.totalEdgeLength = 0.0;
-    }
     
     return result;
 }
