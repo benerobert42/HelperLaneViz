@@ -125,6 +125,10 @@ MeshMetrics computeMeshMetrics(const std::vector<Vertex>& vertices,
     
     result.binningCostIndex = tileMetrics.binningCostIndex;
     
+    // Note: overdrawSum and overdrawRatio should be computed via GPU
+    // using Renderer::computeOverdrawMetricsWithOverdrawSum:overdrawRatio:
+    // for accurate results. They are initialized to 0 here.
+    
     return result;
 }
 
@@ -164,6 +168,11 @@ void printMeshMetrics(const MeshMetrics& metrics,
     printf("│  Mean:                 %.2f tiles/triangle\n", metrics.tilesPerTriangle_Mean);
     printf("│  Median:               %.2f tiles/triangle\n", metrics.tilesPerTriangle_Median);
     printf("│  95th Percentile:      %.2f tiles/triangle\n", metrics.tilesPerTriangle_P95);
+    printf("└──────────────────────────────────────────────────────────────────┘\n");
+    
+    printf("\n┌─ Overdraw (GPU-measured pixel shader efficiency) ──────────────┐\n");
+    printf("│  Total Pixel Draws:    %llu\n", metrics.overdrawSum);
+    printf("│  Overdraw Ratio:       %.3f  (1.0 = no overdraw, higher = worse)\n", metrics.overdrawRatio);
     printf("└──────────────────────────────────────────────────────────────────┘\n");
     
     printf("\n");

@@ -91,6 +91,36 @@ kernel void binTrianglesToTiles(
        }
 }
 
+// MARK: - Overdraw Measurement
+
+// Fragment shader for overdraw counting - outputs 1.0 per fragment
+// Used with additive blending to count draws per pixel
+fragment float overdrawCountFS(float4 position [[position]]) {
+    return 1.0;
+}
+
+// Compute shader to sum overdraw texture values
+// Returns: buffer[0] = total pixel draws (overdraw sum)
+//          buffer[1] = unique pixels covered (pixels with value > 0)
+kernel void sumOverdrawTexture(
+    texture2d<float, access::read> overdrawTex [[ texture(0) ]],
+    device atomic_uint* results [[ buffer(0) ]],
+    uint2 tid [[ thread_position_in_grid ]])
+{
+    uint2 texSize = uint2(overdrawTex.get_width(), overdrawTex.get_height());
+    if (tid.x >= texSize.x || tid.y >= texSize.y) return;
+    
+    float value = overdrawTex.read(tid).r;
+    uint count = uint(value + 0.5); // Round to nearest integer
+    
+    if (count > 0) {
+        atomic_fetch_add_explicit(&results[0], count, memory_order_relaxed);  // Total draws
+        atomic_fetch_add_explicit(&results[1], 1u, memory_order_relaxed);     // Unique pixels
+    }
+}
+
+// MARK: - Tile Heatmap
+
 // countsToTexture.metal
 kernel void countsToTexture(
     device const uint*  tileCounts   [[ buffer(0) ]],

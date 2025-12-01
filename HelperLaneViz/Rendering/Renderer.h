@@ -38,4 +38,9 @@ typedef NS_ENUM(NSInteger, TriangulationMethod) {
 // Run a quick benchmark with reduced test matrix for faster iteration.
 - (void)runQuickBenchmark;
 
+// Compute overdraw metrics using GPU rasterization (accurate)
+// Returns total pixel draws and overdraw ratio (totalDraws / uniquePixels)
+- (void)computeOverdrawMetricsWithOverdrawSum:(uint64_t* _Nullable)outSum
+                                overdrawRatio:(double* _Nullable)outRatio;
+
 @end

@@ -63,6 +63,33 @@ id<MTLRenderPipelineState> MakeGridOverlayPipelineState(id<MTLDevice> device,
     return [device newRenderPipelineStateWithDescriptor:d error:error];
 }
 
+id<MTLRenderPipelineState> MakeOverdrawCountPipelineState(id<MTLDevice> device,
+                                                          id<MTLLibrary> library,
+                                                          NSError **error) {
+    MTLRenderPipelineDescriptor *d = [MTLRenderPipelineDescriptor new];
+    d.label = @"OverdrawCountPipeline";
+    d.vertexFunction   = [library newFunctionWithName:@"mainVS"];
+    d.fragmentFunction = [library newFunctionWithName:@"overdrawCountFS"];
+    
+    // R32Float color attachment for accurate counting
+    d.colorAttachments[0].pixelFormat = MTLPixelFormatR32Float;
+    
+    // Additive blending: each fragment adds 1.0
+    MTLRenderPipelineColorAttachmentDescriptor *ca = d.colorAttachments[0];
+    ca.blendingEnabled = YES;
+    ca.rgbBlendOperation   = MTLBlendOperationAdd;
+    ca.alphaBlendOperation = MTLBlendOperationAdd;
+    ca.sourceRGBBlendFactor   = MTLBlendFactorOne;
+    ca.destinationRGBBlendFactor = MTLBlendFactorOne;
+    ca.sourceAlphaBlendFactor   = MTLBlendFactorOne;
+    ca.destinationAlphaBlendFactor = MTLBlendFactorOne;
+    
+    // No depth attachment needed for overdraw counting
+    d.depthAttachmentPixelFormat = MTLPixelFormatInvalid;
+    
+    return [device newRenderPipelineStateWithDescriptor:d error:error];
+}
+
 id<MTLDepthStencilState> MakeDepthState(id<MTLDevice> device) {
     MTLDepthStencilDescriptor *ds = [MTLDepthStencilDescriptor new];
     ds.depthWriteEnabled = YES;

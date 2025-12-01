@@ -40,6 +40,11 @@ struct MeshMetrics {
     // Normalized binning cost: totalTileOverlaps / idealTileCoverage
     // Values close to 1.0 indicate efficient triangles; higher values indicate many small/thin triangles
     double binningCostIndex = 0.0;
+    
+    // Overdraw metrics (GPU-measured pixel-level shader invocation efficiency)
+    // These should be populated via Renderer::computeOverdrawMetricsWithOverdrawSum:overdrawRatio:
+    uint64_t overdrawSum = 0;             ///< Total pixel draws (GPU rasterization count)
+    double overdrawRatio = 0.0;           ///< overdrawSum / uniquePixelsCovered (1.0 = no overdraw)
 };
 
 /// Computes comprehensive metrics for a 2D triangulated mesh.

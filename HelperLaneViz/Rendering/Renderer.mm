@@ -77,6 +77,12 @@ static constexpr uint32_t kDefaultTileSize = 32;
     
     // Overdraw visualization
     id<MTLRenderPipelineState> _overdrawPipeline;
+    
+    // Overdraw measurement (GPU-based)
+    id<MTLRenderPipelineState> _overdrawCountPipeline;
+    id<MTLComputePipelineState> _sumOverdrawPipeline;
+    id<MTLTexture> _overdrawCountTexture;
+    id<MTLBuffer> _overdrawResultsBuffer;
 }
 
 @synthesize showGridOverlay = _showGridOverlay;
@@ -97,22 +103,22 @@ static constexpr uint32_t kDefaultTileSize = 32;
     // Default visualization settings
     _showGridOverlay = YES;
     _showHeatmap = NO;
-    _showOverdraw = NO;
+    _showOverdraw = YES;
 
     [self setupView];
     [self setupPipelines];
     [self setupGridOverlay];
     [self setupTileHeatmapPipelines];
     
-    // Configure geometry: ellipse with 300 vertices, MWT triangulation, 3x3 grid
+//  Configure geometry: ellipse with 300 vertices, MWT triangulation, 3x3 grid
 //    [self setupEllipseWithVertexCount:20
 //                        semiMajorAxis:1.0f
 //                        semiMinorAxis:1.0f
-//                  triangulationMethod:TriangulationMethodMinimumWeight
+//                  triangulationMethod:TriangulationMethodGreedyMaxArea
 //                     instanceGridSize:10
 //                         printMetrics:YES];
-    [self loadSVGFromPath:@"/Users/robi/Downloads/Tractor2.svg"
-      triangulationMethod:TriangulationMethodGreedyMaxArea
+    [self loadSVGFromPath:@"/Users/robi/Downloads/tiger-svgrepo-com.svg"
+      triangulationMethod:TriangulationMethodMinimumWeight
          instanceGridSize:1];
 
     return self;
@@ -138,11 +144,22 @@ static constexpr uint32_t kDefaultTileSize = 32;
     _overdrawPipeline = MakeOverdrawPipelineState(_device, _view, library, &error);
     NSAssert(_overdrawPipeline, @"Failed to create overdraw pipeline: %@", error);
     
+    _overdrawCountPipeline = MakeOverdrawCountPipelineState(_device, library, &error);
+    NSAssert(_overdrawCountPipeline, @"Failed to create overdraw count pipeline: %@", error);
+    
+    id<MTLFunction> sumOverdrawFunc = [library newFunctionWithName:@"sumOverdrawTexture"];
+    _sumOverdrawPipeline = [_device newComputePipelineStateWithFunction:sumOverdrawFunc error:&error];
+    NSAssert(_sumOverdrawPipeline, @"Failed to create sumOverdraw pipeline: %@", error);
+    
     _gridOverlayPipeline = MakeGridOverlayPipelineState(_device, _view, library, &error);
     NSAssert(_gridOverlayPipeline, @"Failed to create grid overlay pipeline: %@", error);
     
     _depthState = MakeDepthState(_device);
     _noDepthState = MakeNoDepthState(_device);
+    
+    // Allocate overdraw results buffer (2 uints: total draws, unique pixels)
+    _overdrawResultsBuffer = [_device newBufferWithLength:sizeof(uint32_t) * 2
+                                                  options:MTLResourceStorageModeShared];
 }
 
 - (void)setupGridOverlay {
@@ -437,6 +454,100 @@ static constexpr uint32_t kDefaultTileSize = 32;
     [encoder dispatchThreads:MTLSizeMake(_tileCountX, _tileCountY, 1)
        threadsPerThreadgroup:MTLSizeMake(8, 8, 1)];
     [encoder endEncoding];
+}
+
+// MARK: - Overdraw Measurement (GPU-based)
+
+- (void)reallocateOverdrawTextureIfNeeded {
+    const uint32_t width = (uint32_t)_view.drawableSize.width;
+    const uint32_t height = (uint32_t)_view.drawableSize.height;
+    
+    if (_overdrawCountTexture &&
+        _overdrawCountTexture.width == width &&
+        _overdrawCountTexture.height == height) {
+        return;
+    }
+    
+    MTLTextureDescriptor *desc = [MTLTextureDescriptor
+        texture2DDescriptorWithPixelFormat:MTLPixelFormatR32Float
+                                     width:width
+                                    height:height
+                                 mipmapped:NO];
+    desc.usage = MTLTextureUsageRenderTarget | MTLTextureUsageShaderRead;
+    desc.storageMode = MTLStorageModePrivate;
+    _overdrawCountTexture = [_device newTextureWithDescriptor:desc];
+}
+
+- (void)computeOverdrawMetricsWithOverdrawSum:(uint64_t*)outSum overdrawRatio:(double*)outRatio {
+    if (!_vertexBuffer || !_indexBuffer) {
+        if (outSum) *outSum = 0;
+        if (outRatio) *outRatio = 0.0;
+        return;
+    }
+    
+    [self reallocateOverdrawTextureIfNeeded];
+    
+    id<MTLCommandBuffer> commandBuffer = [_commandQueue commandBuffer];
+    
+    // Step 1: Render triangles to overdraw count texture
+    MTLRenderPassDescriptor *renderPass = [MTLRenderPassDescriptor new];
+    renderPass.colorAttachments[0].texture = _overdrawCountTexture;
+    renderPass.colorAttachments[0].loadAction = MTLLoadActionClear;
+    renderPass.colorAttachments[0].storeAction = MTLStoreActionStore;
+    renderPass.colorAttachments[0].clearColor = MTLClearColorMake(0, 0, 0, 0);
+    
+    id<MTLRenderCommandEncoder> renderEncoder = [commandBuffer renderCommandEncoderWithDescriptor:renderPass];
+    [renderEncoder setRenderPipelineState:_overdrawCountPipeline];
+    [renderEncoder setCullMode:MTLCullModeNone];
+    [renderEncoder setTriangleFillMode:MTLTriangleFillModeFill];
+    
+    FrameConstants frameConstants = {
+        .viewProjectionMatrix = _viewProjectionMatrix,
+        .viewPortSize = _viewportSize
+    };
+    
+    [renderEncoder setVertexBuffer:_vertexBuffer offset:0 atIndex:VertexInputIndexVertices];
+    [renderEncoder setVertexBytes:&frameConstants length:sizeof(frameConstants) atIndex:VertexInputIndexFrameConstants];
+    [renderEncoder setVertexBytes:&_gridParams length:sizeof(_gridParams) atIndex:VertexInputGridParams];
+    
+    const NSUInteger indexCount = _indexBuffer.length / sizeof(uint32_t);
+    const NSUInteger instanceCount = _gridParams.cols * _gridParams.rows;
+    
+    [renderEncoder drawIndexedPrimitives:MTLPrimitiveTypeTriangle
+                              indexCount:indexCount
+                               indexType:MTLIndexTypeUInt32
+                             indexBuffer:_indexBuffer
+                       indexBufferOffset:0
+                           instanceCount:instanceCount];
+    [renderEncoder endEncoding];
+    
+    // Step 2: Clear results buffer
+    uint32_t* resultsPtr = (uint32_t*)_overdrawResultsBuffer.contents;
+    resultsPtr[0] = 0;  // Total draws
+    resultsPtr[1] = 0;  // Unique pixels
+    
+    // Step 3: Sum overdraw texture with compute shader
+    id<MTLComputeCommandEncoder> computeEncoder = [commandBuffer computeCommandEncoder];
+    [computeEncoder setComputePipelineState:_sumOverdrawPipeline];
+    [computeEncoder setTexture:_overdrawCountTexture atIndex:0];
+    [computeEncoder setBuffer:_overdrawResultsBuffer offset:0 atIndex:0];
+    
+    const uint32_t width = (uint32_t)_overdrawCountTexture.width;
+    const uint32_t height = (uint32_t)_overdrawCountTexture.height;
+    [computeEncoder dispatchThreads:MTLSizeMake(width, height, 1)
+              threadsPerThreadgroup:MTLSizeMake(16, 16, 1)];
+    [computeEncoder endEncoding];
+    
+    // Wait for completion
+    [commandBuffer commit];
+    [commandBuffer waitUntilCompleted];
+    
+    // Read results
+    uint64_t totalDraws = resultsPtr[0];
+    uint64_t uniquePixels = resultsPtr[1];
+    
+    if (outSum) *outSum = totalDraws;
+    if (outRatio) *outRatio = (uniquePixels > 0) ? ((double)totalDraws / uniquePixels) : 0.0;
 }
 
 // MARK: - MTKViewDelegate

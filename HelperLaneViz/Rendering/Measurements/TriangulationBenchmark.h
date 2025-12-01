@@ -101,8 +101,8 @@ struct SceneConfig {
 
 struct BenchmarkConfig {
     std::vector<SceneConfig> scenes;
-    int warmupFrames = 10;
-    int measureFrames = 100;
+    int warmupFrames = 20;
+    int measureFrames = 200;
     simd_int2 framebufferSize = {1920, 1080};
     uint32_t tileSize = 32;
     
