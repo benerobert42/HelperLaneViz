@@ -29,7 +29,12 @@ vertex MainVSOut mainVS(uint vertexId [[vertex_id]],
     return out;
 }
 
-fragment float4 mainFS(MainVSOut in [[stage_in]]) {
+fragment float4 mainFS(MainVSOut in [[stage_in]],
+                       texture2d<float> helperTex [[texture(0)]],
+                       sampler smp [[sampler(0)]]) {
+    // Sample texture to engage helper lanes (sample() requires derivatives)
+    float dummy = helperTex.sample(smp, float2(0.5)).r;
+    
     const int isHelperThread = simd_is_helper_thread() ? 1 : 0;
 
     const int sum =
@@ -45,7 +50,7 @@ fragment float4 mainFS(MainVSOut in [[stage_in]]) {
         float4(1.0, 0.0, 0.0, 1.0)   // 3
     };
 
-    return kColors[clamp(sum, 0, 3)];
+    return kColors[clamp(sum, 0, 3)] + float4(dummy * 0.001);
 }
 
 fragment float4 overdrawFS(MainVSOut in [[stage_in]]) {

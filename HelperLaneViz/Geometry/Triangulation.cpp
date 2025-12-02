@@ -288,8 +288,9 @@ Result minimumWeightTriangulation(const std::vector<Vertex>& vertices) {
         return result;
     }
     
-    // DP tables: dp[i][j] = minimum edge weight to triangulate polygon from i to j
-    //            split[i][j] = optimal split point k for the interval [i, j]
+    // DP tables:
+    // dp[i][j] = minimum edge weight to triangulate polygon from i to j
+    // split[i][j] = optimal split point k for the interval [i, j]
     std::vector<double> dpTable(vertexCount * vertexCount, 0.0);
     std::vector<int> splitTable(vertexCount * vertexCount, -1);
     
@@ -314,8 +315,15 @@ Result minimumWeightTriangulation(const std::vector<Vertex>& vertices) {
             int optimalSplit = -1;
             
             for (int splitPoint = startIndex + 1; splitPoint < endIndex; ++splitPoint) {
-                // Skip invalid triangles
-                if (!isTriangleValidForPolygon(vertices, startIndex, splitPoint, endIndex)) continue;
+                for (int v = 0; v < vertexCount; ++v) {
+                    if (v == startIndex || v == splitPoint || v == endIndex) continue;
+                    if (pointInTriangle(vertices[v].position,
+                                        vertices[startIndex].position,
+                                        vertices[splitPoint].position,
+                                        vertices[endIndex].position)) {
+                        continue;
+                    }
+                }
                 
                 // Cost = left subproblem + right subproblem + new internal edges
                 const double internalEdgeCost = edgeLength(vertices[startIndex], vertices[splitPoint])
@@ -457,6 +465,32 @@ Result greedyMaxAreaTriangulation(const std::vector<Vertex>& vertices) {
         return true;
     };
     
+    // Helper: check if triangle is valid (must use isEdgeValid to check against added edges)
+    auto isTriangleValid = [&](uint32_t i, uint32_t j, uint32_t k) -> bool {
+        // Check orientation
+        double cross = cross2D(vertices[i].position, vertices[j].position, vertices[k].position);
+        if (isCCW && cross <= 1e-10) return false;
+        if (!isCCW && cross >= -1e-10) return false;
+        
+        // Check no other vertices inside
+        for (size_t m = 0; m < n; ++m) {
+            if (m == i || m == j || m == k) continue;
+            if (pointInTriangle(vertices[m].position,
+                               vertices[i].position,
+                               vertices[j].position,
+                               vertices[k].position)) {
+                return false;
+            }
+        }
+        
+        // Check all edges valid (against dynamically added edges)
+        if (!isEdgeValid(i, j)) return false;
+        if (!isEdgeValid(j, k)) return false;
+        if (!isEdgeValid(k, i)) return false;
+        
+        return true;
+    };
+    
     // Greedy: find n-2 triangles
     for (size_t triCount = 0; triCount < n - 2; ++triCount) {
         double maxArea = -1.0;
@@ -471,7 +505,7 @@ Result greedyMaxAreaTriangulation(const std::vector<Vertex>& vertices) {
                     auto triKey = std::make_tuple(i, j, k);
                     if (usedTriangles.count(triKey)) continue;
                     
-                    if (isTriangleValidForPolygon(vertices, i, j, k)) {
+                    if (isTriangleValid(i, j, k)) {
                         double area = triangleArea(vertices, i, j, k);
                         if (area > maxArea) {
                             maxArea = area;

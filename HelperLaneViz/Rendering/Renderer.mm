@@ -83,6 +83,10 @@ static constexpr uint32_t kDefaultTileSize = 32;
     id<MTLComputePipelineState> _sumOverdrawPipeline;
     id<MTLTexture> _overdrawCountTexture;
     id<MTLBuffer> _overdrawResultsBuffer;
+    
+    // Helper lane engagement (1x1 dummy texture for forcing derivative computation)
+    id<MTLTexture> _helperLaneTexture;
+    id<MTLSamplerState> _pointSampler;
 }
 
 @synthesize showGridOverlay = _showGridOverlay;
@@ -103,7 +107,7 @@ static constexpr uint32_t kDefaultTileSize = 32;
     // Default visualization settings
     _showGridOverlay = YES;
     _showHeatmap = NO;
-    _showOverdraw = YES;
+    _showOverdraw = NO;
 
     [self setupView];
     [self setupPipelines];
@@ -117,9 +121,14 @@ static constexpr uint32_t kDefaultTileSize = 32;
 //                  triangulationMethod:TriangulationMethodGreedyMaxArea
 //                     instanceGridSize:10
 //                         printMetrics:YES];
-    [self loadSVGFromPath:@"/Users/robi/Downloads/tiger-svgrepo-com.svg"
-      triangulationMethod:TriangulationMethodMinimumWeight
+    [self loadSVGFromPath:@"/Users/robi/Downloads/Tractor2.svg"
+      triangulationMethod:TriangulationMethodGreedyMaxArea
          instanceGridSize:1];
+
+    uint64_t overdrawSum;
+    double overdrawRatio;
+    [self computeOverdrawMetricsWithOverdrawSum:&overdrawSum overdrawRatio:&overdrawRatio];
+    NSLog(@"Overdraw: sum=%llu, ratio=%.3f", overdrawSum, overdrawRatio);
 
     return self;
 }
@@ -160,6 +169,17 @@ static constexpr uint32_t kDefaultTileSize = 32;
     // Allocate overdraw results buffer (2 uints: total draws, unique pixels)
     _overdrawResultsBuffer = [_device newBufferWithLength:sizeof(uint32_t) * 2
                                                   options:MTLResourceStorageModeShared];
+    
+    // Create 1x1 dummy texture for helper lane engagement
+    MTLTextureDescriptor *helperTexDesc = [MTLTextureDescriptor texture2DDescriptorWithPixelFormat:MTLPixelFormatR8Unorm width:1 height:1 mipmapped:NO];
+    _helperLaneTexture = [_device newTextureWithDescriptor:helperTexDesc];
+    uint8_t white = 255;
+    [_helperLaneTexture replaceRegion:MTLRegionMake2D(0, 0, 1, 1) mipmapLevel:0 withBytes:&white bytesPerRow:1];
+    
+    MTLSamplerDescriptor *samplerDesc = [MTLSamplerDescriptor new];
+    samplerDesc.minFilter = MTLSamplerMinMagFilterNearest;
+    samplerDesc.magFilter = MTLSamplerMinMagFilterNearest;
+    _pointSampler = [_device newSamplerStateWithDescriptor:samplerDesc];
 }
 
 - (void)setupGridOverlay {
@@ -596,7 +616,7 @@ static constexpr uint32_t kDefaultTileSize = 32;
     [encoder setRenderPipelineState:_mainPipeline];
     [encoder setDepthStencilState:_depthState];
     [encoder setCullMode:MTLCullModeNone];
-    [encoder setTriangleFillMode:MTLTriangleFillModeLines];
+    [encoder setTriangleFillMode:MTLTriangleFillModeFill];
 
     FrameConstants frameConstants = {
         .viewProjectionMatrix = _viewProjectionMatrix,
@@ -606,6 +626,10 @@ static constexpr uint32_t kDefaultTileSize = 32;
     [encoder setVertexBuffer:_vertexBuffer offset:0 atIndex:VertexInputIndexVertices];
     [encoder setVertexBytes:&frameConstants length:sizeof(frameConstants) atIndex:VertexInputIndexFrameConstants];
     [encoder setVertexBytes:&_gridParams length:sizeof(_gridParams) atIndex:VertexInputGridParams];
+    
+    // Bind dummy texture to engage helper lanes via texture sampling
+    [encoder setFragmentTexture:_helperLaneTexture atIndex:0];
+    [encoder setFragmentSamplerState:_pointSampler atIndex:0];
     
     const NSUInteger indexCount = _indexBuffer.length / sizeof(uint32_t);
     const NSUInteger instanceCount = _gridParams.cols * _gridParams.rows;
