@@ -8,6 +8,7 @@
 #import <MetalKit/MetalKit.h>
 
 typedef NS_ENUM(NSInteger, TriangulationMethod) {
+    TriangulationMethodEarClipping,
     TriangulationMethodMinimumWeight,
     TriangulationMethodCentroidFan,
     TriangulationMethodGreedyMaxArea,
@@ -28,7 +29,8 @@ typedef NS_ENUM(NSInteger, TriangulationMethod) {
 // Load SVG and triangulate with specified method
 - (BOOL)loadSVGFromPath:(nonnull NSString *)path
     triangulationMethod:(TriangulationMethod)method
-       instanceGridSize:(uint32_t)gridSize;
+       instanceGridCols:(uint32_t)cols
+               gridRows:(uint32_t)rows;
 
 // Run the complete benchmark suite (36 scenes × 7 methods = 252 tests).
 // 3 shapes × 4 vertex counts × 3 instance counts.

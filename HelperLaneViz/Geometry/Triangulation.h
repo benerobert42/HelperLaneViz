@@ -22,6 +22,9 @@ struct Result {
 
 // MARK: - Polygon Triangulation Methods
 
+// Simple ear clipping triangulation - O(n²), works for any simple polygon.
+Result earClippingTriangulation(const std::vector<Vertex>& vertices);
+
 // Minimum Weight Triangulation using dynamic programming.
 Result minimumWeightTriangulation(const std::vector<Vertex>& vertices);
 

@@ -115,15 +115,17 @@ static constexpr uint32_t kDefaultTileSize = 32;
     [self setupTileHeatmapPipelines];
     
 //  Configure geometry: ellipse with 300 vertices, MWT triangulation, 3x3 grid
-//    [self setupEllipseWithVertexCount:20
-//                        semiMajorAxis:1.0f
-//                        semiMinorAxis:1.0f
-//                  triangulationMethod:TriangulationMethodGreedyMaxArea
-//                     instanceGridSize:10
-//                         printMetrics:YES];
-    [self loadSVGFromPath:@"/Users/robi/Downloads/Tractor2.svg"
-      triangulationMethod:TriangulationMethodGreedyMaxArea
-         instanceGridSize:1];
+    [self setupEllipseWithVertexCount:50
+                        semiMajorAxis:1.0f
+                        semiMinorAxis:0.2f
+                  triangulationMethod:TriangulationMethodConstrainedDelaunay
+                     instanceGridCols:10
+                             gridRows:50
+                         printMetrics:YES];
+//    [self loadSVGFromPath:@"/Users/robi/Downloads/Tractor2.svg"
+//      triangulationMethod:TriangulationMethodGreedyMaxArea
+//         instanceGridCols:1
+//                 gridRows:1];
 
     uint64_t overdrawSum;
     double overdrawRatio;
@@ -206,7 +208,8 @@ static constexpr uint32_t kDefaultTileSize = 32;
                       semiMajorAxis:(float)a
                       semiMinorAxis:(float)b
                 triangulationMethod:(TriangulationMethod)method
-                   instanceGridSize:(uint32_t)gridSize
+                   instanceGridCols:(uint32_t)cols
+                           gridRows:(uint32_t)rows
                        printMetrics:(BOOL)printMetrics {
     
     _currentVertices = GeometryFactory::CreateVerticesForEllipse(vertexCount, a, b);
@@ -215,7 +218,7 @@ static constexpr uint32_t kDefaultTileSize = 32;
     [self uploadVertices:_currentVertices indices:_currentIndices];
     
     [self setupOrthographicProjection];
-    [self setupInstanceGridWithSize:gridSize];
+    [self setupInstanceGridWithCols:cols rows:rows];
 
     if (printMetrics) {
         simd_int2 framebufferSize = {(int)_view.drawableSize.width, (int)_view.drawableSize.height};
@@ -227,20 +230,23 @@ static constexpr uint32_t kDefaultTileSize = 32;
 - (void)setupCircleWithVertexCount:(int)vertexCount
                             radius:(float)radius
                triangulationMethod:(TriangulationMethod)method
-                  instanceGridSize:(uint32_t)gridSize
+                  instanceGridCols:(uint32_t)cols
+                          gridRows:(uint32_t)rows
                       printMetrics:(BOOL)printMetrics {
     
     [self setupEllipseWithVertexCount:vertexCount
                         semiMajorAxis:radius
                         semiMinorAxis:radius
                   triangulationMethod:method
-                     instanceGridSize:gridSize
+                     instanceGridCols:cols
+                             gridRows:rows
                          printMetrics:printMetrics];
 }
 
 - (BOOL)loadSVGFromPath:(NSString *)path
     triangulationMethod:(TriangulationMethod)method
-       instanceGridSize:(uint32_t)gridSize {
+       instanceGridCols:(uint32_t)cols
+               gridRows:(uint32_t)rows {
     
     // Create triangulator that uses the selected method
     SVGLoader::Triangulator triangulator = [self, method](std::vector<Vertex>& verts) -> std::vector<uint32_t> {
@@ -265,10 +271,10 @@ static constexpr uint32_t kDefaultTileSize = 32;
     
     [self uploadVertices:vertices indices:indices];
     [self setupOrthographicProjection];
-    [self setupInstanceGridWithSize:gridSize];
+    [self setupInstanceGridWithCols:cols rows:rows];
     
-    NSLog(@"Loaded SVG: %@ (%zu vertices, %zu triangles, method=%ld)",
-          path, vertices.size(), indices.size() / 3, (long)method);
+    NSLog(@"Loaded SVG: %@ (%zu vertices, %zu triangles, method=%ld, grid=%dx%d)",
+          path, vertices.size(), indices.size() / 3, (long)method, cols, rows);
     
     return YES;
 }
@@ -278,6 +284,10 @@ static constexpr uint32_t kDefaultTileSize = 32;
     Triangulation::Result result;
     
     switch (method) {
+        case TriangulationMethodEarClipping:
+            result = Triangulation::earClippingTriangulation(vertices);
+            break;
+            
         case TriangulationMethodMinimumWeight:
             result = Triangulation::minimumWeightTriangulation(vertices);
             break;
@@ -333,37 +343,63 @@ static constexpr uint32_t kDefaultTileSize = 32;
     _viewProjectionMatrix = simd_mul(projMatrix, viewMatrix);
 }
 
-- (void)setupInstanceGridWithSize:(uint32_t)gridSize {
+- (void)setupInstanceGridWithCols:(uint32_t)cols rows:(uint32_t)rows {
     // Fill the viewport with a grid of instances
     // NDC space is [-1, 1] in both X and Y
     
+    // Compute actual geometry bounds
+    float minX = FLT_MAX, maxX = -FLT_MAX;
+    float minY = FLT_MAX, maxY = -FLT_MAX;
+    for (const auto& v : _currentVertices) {
+        minX = std::min(minX, v.position.x);
+        maxX = std::max(maxX, v.position.x);
+        minY = std::min(minY, v.position.y);
+        maxY = std::max(maxY, v.position.y);
+    }
+    const float geomWidth = maxX - minX;
+    const float geomHeight = maxY - minY;
+    const float geomAspect = (geomHeight > 0.0001f) ? (geomWidth / geomHeight) : 1.0f;
+    
     // Add padding around edges and between instances
-    const float edgePadding = 0.02f; // 2% padding at edges
-    const float instancePadding = 0.01f; // 1% padding between instances
+    const float edgePadding = 0.02f;
+    const float instancePadding = 0.01f;
 
     // Available space after edge padding
     const float availableWidth = 2.0f - 2.0f * edgePadding;
     const float availableHeight = 2.0f - 2.0f * edgePadding;
     
     // Total padding between instances
-    const float totalGapX = instancePadding * (gridSize - 1);
-    const float totalGapY = instancePadding * (gridSize - 1);
+    const float totalGapX = instancePadding * (cols - 1);
+    const float totalGapY = instancePadding * (rows - 1);
     
-    // Cell size (including the shape)
-    const float cellWidth = (availableWidth - totalGapX) / gridSize;
-    const float cellHeight = (availableHeight - totalGapY) / gridSize;
+    // Base cell size
+    const float baseCellWidth = (availableWidth - totalGapX) / cols;
+    const float baseCellHeight = (availableHeight - totalGapY) / rows;
     
-    // Scale factor to fit shape within cell (use smaller dimension for uniform scaling)
-    // Shapes span from -1.0 to +1.0 (diameter = 2.0), so divide by 2 to fit in cell
-    const float shapeScale = std::min(cellWidth, cellHeight) * 0.5f * 0.9f; // 90% of cell for breathing room
+    // Adjust cell dimensions to match geometry aspect ratio
+    float cellWidth, cellHeight;
+    if (geomAspect > 1.0f) {
+        // Geometry is wider than tall
+        cellWidth = baseCellWidth;
+        cellHeight = baseCellWidth / geomAspect;
+    } else {
+        // Geometry is taller than wide (or square)
+        cellHeight = baseCellHeight;
+        cellWidth = baseCellHeight * geomAspect;
+    }
+    
+    // Scale factor: geometry spans geomWidth x geomHeight, fit into cell
+    const float scaleX = cellWidth / geomWidth;
+    const float scaleY = cellHeight / geomHeight;
+    const float shapeScale = std::min(scaleX, scaleY) * 0.9f; // 90% for breathing room
     
     // Origin is bottom-left of the grid in NDC
     const float originX = -1.0f + edgePadding + cellWidth * 0.5f;
     const float originY = -1.0f + edgePadding + cellHeight * 0.5f;
     
     _gridParams = (GridParams){
-        .cols = gridSize,
-        .rows = gridSize,
+        .cols = cols,
+        .rows = rows,
         .cellSize = {cellWidth + instancePadding, cellHeight + instancePadding},
         .origin = {originX, originY},
         .scale = shapeScale
@@ -695,7 +731,8 @@ static constexpr uint32_t kDefaultTileSize = 32;
                         semiMajorAxis:(float)a
                         semiMinorAxis:(float)b
                   triangulationMethod:(int)method
-                     instanceGridSize:(uint32_t)gridSize {
+                     instanceGridCols:(uint32_t)cols
+                             gridRows:(uint32_t)rows {
     
     // Measure triangulation time
     uint64_t startTime = mach_absolute_time();
@@ -704,7 +741,8 @@ static constexpr uint32_t kDefaultTileSize = 32;
                         semiMajorAxis:a
                         semiMinorAxis:b
                   triangulationMethod:(TriangulationMethod)method
-                     instanceGridSize:gridSize
+                     instanceGridCols:cols
+                             gridRows:rows
                          printMetrics:NO];
     
     uint64_t endTime = mach_absolute_time();
@@ -819,7 +857,8 @@ static constexpr uint32_t kDefaultTileSize = 32;
                         semiMajorAxis:1.0f
                         semiMinorAxis:0.5f
                   triangulationMethod:TriangulationMethodMinimumWeight
-                     instanceGridSize:3
+                     instanceGridCols:3
+                             gridRows:3
                          printMetrics:NO];
     
     _view.paused = NO;

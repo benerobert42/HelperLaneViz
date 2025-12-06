@@ -23,12 +23,10 @@ namespace Triangulation {
 
 namespace {
 
-// Euclidean distance between two vertices
 inline double edgeLength(const Vertex& vertexA, const Vertex& vertexB) {
     return simd_distance_squared(vertexB.position, vertexA.position);
 }
 
-// Perimeter of a triangle defined by three vertices
 inline double trianglePerimeter(const std::vector<Vertex>& vertices,
                                 uint32_t indexA, uint32_t indexB, uint32_t indexC) {
     return edgeLength(vertices[indexA], vertices[indexB])
@@ -36,7 +34,6 @@ inline double trianglePerimeter(const std::vector<Vertex>& vertices,
          + edgeLength(vertices[indexC], vertices[indexA]);
 }
 
-// Absolute area of a triangle using the cross product formula
 inline double triangleArea(const std::vector<Vertex>& vertices,
                            uint32_t indexA, uint32_t indexB, uint32_t indexC) {
     const simd_float3 ab = vertices[indexB].position - vertices[indexA].position;
@@ -280,6 +277,55 @@ inline std::vector<uint32_t> buildCCWOrder(const std::vector<Vertex>& vertices) 
 
 // MARK: - Triangulation Implementations
 
+Result earClippingTriangulation(const std::vector<Vertex>& vertices) {
+    Result result;
+    const size_t n = vertices.size();
+    
+    if (n < 3) return result;
+    
+    const bool isCCW = polygonSignedArea(vertices) >= 0.0;
+    
+    // Working list of remaining vertex indices
+    std::vector<uint32_t> polygon(n);
+    std::iota(polygon.begin(), polygon.end(), 0);
+    
+    result.indices.reserve((n - 2) * 3);
+    
+    // Clip ears until only 3 vertices remain
+    while (polygon.size() > 3) {
+        const size_t size = polygon.size();
+        bool earFound = false;
+        
+        for (size_t i = 0; i < size; ++i) {
+            const size_t prev = (i + size - 1) % size;
+            const size_t next = (i + 1) % size;
+            
+            if (isValidEar(vertices, polygon, prev, i, next, isCCW)) {
+                // Emit triangle
+                result.indices.push_back(polygon[prev]);
+                result.indices.push_back(polygon[i]);
+                result.indices.push_back(polygon[next]);
+                
+                // Remove the ear vertex
+                polygon.erase(polygon.begin() + static_cast<ptrdiff_t>(i));
+                earFound = true;
+                break;
+            }
+        }
+        
+        if (!earFound) break; // No valid ear found, polygon may be degenerate
+    }
+    
+    // Add final triangle
+    if (polygon.size() == 3) {
+        result.indices.push_back(polygon[0]);
+        result.indices.push_back(polygon[1]);
+        result.indices.push_back(polygon[2]);
+    }
+    
+    return result;
+}
+
 Result minimumWeightTriangulation(const std::vector<Vertex>& vertices) {
     Result result;
     const int vertexCount = static_cast<int>(vertices.size());
@@ -410,136 +456,96 @@ Result centroidFanTriangulation(std::vector<Vertex>& vertices) {
 
 Result greedyMaxAreaTriangulation(const std::vector<Vertex>& vertices) {
     Result result;
-    const size_t n = vertices.size();
+    const size_t vertexCount = vertices.size();
     
-    if (n < 3) return result;
-    
-    const bool isCCW = polygonSignedArea(vertices) >= 0.0;
-    
-    // Track which edges exist: polygon boundary + added diagonals
-    // Edge stored as (min_idx, max_idx)
-    std::set<std::pair<uint32_t, uint32_t>> edges;
-    
-    // Add polygon boundary edges
-    for (size_t i = 0; i < n; ++i) {
-        uint32_t a = static_cast<uint32_t>(i);
-        uint32_t b = static_cast<uint32_t>((i + 1) % n);
-        if (a > b) std::swap(a, b);
-        edges.insert({a, b});
+    if (vertexCount < 3) {
+        return result;
     }
     
-    // Track which triangles we've added
-    std::set<std::tuple<uint32_t, uint32_t, uint32_t>> usedTriangles;
-    
-    result.indices.reserve((n - 2) * 3);
-    
-    // Helper: check if edge exists or can be added (valid diagonal)
-    auto isEdgeValid = [&](uint32_t a, uint32_t b) -> bool {
-        if (a > b) std::swap(a, b);
-        
-        // Already exists - valid
-        if (edges.count({a, b})) return true;
-        
-        const auto& posA = vertices[a].position;
-        const auto& posB = vertices[b].position;
-        
-        // Check diagonal doesn't cross any existing edge
-        for (const auto& edge : edges) {
-            // Skip if shares a vertex
-            if (edge.first == a || edge.first == b || 
-                edge.second == a || edge.second == b) continue;
+    // Recursive solver: triangulates a convex sub-polygon by selecting the largest triangle
+    std::function<void(const std::vector<uint32_t>&)> triangulateSubPolygon =
+        [&](const std::vector<uint32_t>& polygon) {
+            const size_t polygonSize = polygon.size();
             
-            if (segmentsIntersect(posA, posB,
-                                  vertices[edge.first].position,
-                                  vertices[edge.second].position)) {
-                return false;
+            if (polygonSize < 3) return;
+            
+            // Base case: exactly one triangle
+            if (polygonSize == 3) {
+                result.indices.insert(result.indices.end(), {polygon[0], polygon[1], polygon[2]});
+                result.totalEdgeLength += trianglePerimeter(vertices, polygon[0], polygon[1], polygon[2]);
+                return;
             }
-        }
-        
-        // Check midpoint is inside polygon
-        simd_float3 mid = {(posA.x + posB.x) * 0.5f, (posA.y + posB.y) * 0.5f, 1.0f};
-        if (!pointInsidePolygon(mid, vertices)) {
-            return false;
-        }
-        
-        return true;
-    };
-    
-    // Helper: check if triangle is valid (must use isEdgeValid to check against added edges)
-    auto isTriangleValid = [&](uint32_t i, uint32_t j, uint32_t k) -> bool {
-        // Check orientation
-        double cross = cross2D(vertices[i].position, vertices[j].position, vertices[k].position);
-        if (isCCW && cross <= 1e-10) return false;
-        if (!isCCW && cross >= -1e-10) return false;
-        
-        // Check no other vertices inside
-        for (size_t m = 0; m < n; ++m) {
-            if (m == i || m == j || m == k) continue;
-            if (pointInTriangle(vertices[m].position,
-                               vertices[i].position,
-                               vertices[j].position,
-                               vertices[k].position)) {
-                return false;
-            }
-        }
-        
-        // Check all edges valid (against dynamically added edges)
-        if (!isEdgeValid(i, j)) return false;
-        if (!isEdgeValid(j, k)) return false;
-        if (!isEdgeValid(k, i)) return false;
-        
-        return true;
-    };
-    
-    // Greedy: find n-2 triangles
-    for (size_t triCount = 0; triCount < n - 2; ++triCount) {
-        double maxArea = -1.0;
-        uint32_t bestI = 0, bestJ = 0, bestK = 0;
-        bool found = false;
-        
-        // Try ALL combinations of 3 vertices
-        for (uint32_t i = 0; i < n; ++i) {
-            for (uint32_t j = i + 1; j < n; ++j) {
-                for (uint32_t k = j + 1; k < n; ++k) {
-                    // Normalize triangle ordering
-                    auto triKey = std::make_tuple(i, j, k);
-                    if (usedTriangles.count(triKey)) continue;
-                    
-                    if (isTriangleValid(i, j, k)) {
-                        double area = triangleArea(vertices, i, j, k);
-                        if (area > maxArea) {
-                            maxArea = area;
+            
+            // Find the largest-area triangle among all valid triples
+            double largestArea = -1.0;
+            size_t bestI = 0, bestJ = 1, bestK = 2;
+            
+            for (size_t i = 0; i + 2 < polygonSize; ++i) {
+                for (size_t j = i + 1; j + 1 < polygonSize; ++j) {
+                    for (size_t k = j + 1; k < polygonSize; ++k) {
+                        for (int v = 0; v < vertexCount; ++v) {
+                            if (v == i || v == j || v == k) continue;
+                            if (pointInTriangle(vertices[v].position,
+                                                vertices[i].position,
+                                                vertices[j].position,
+                                                vertices[k].position)) {
+                                continue;
+                            }
+                        }
+                        const double area = triangleArea(vertices, polygon[i], polygon[j], polygon[k]);
+                        if (area > largestArea) {
+                            largestArea = area;
                             bestI = i;
                             bestJ = j;
                             bestK = k;
-                            found = true;
                         }
                     }
                 }
             }
-        }
-        
-        if (!found) {
-            return result;
-        }
-        
-        // Add the triangle
-        result.indices.push_back(bestI);
-        result.indices.push_back(bestJ);
-        result.indices.push_back(bestK);
-        result.totalEdgeLength += trianglePerimeter(vertices, bestI, bestJ, bestK);
-        
-        usedTriangles.insert(std::make_tuple(bestI, bestJ, bestK));
-        
-        // Add new edges
-        auto addEdge = [&](uint32_t a, uint32_t b) {
-            if (a > b) std::swap(a, b);
-            edges.insert({a, b});
+            
+            // Emit the selected triangle
+            const uint32_t vertexA = polygon[bestI];
+            const uint32_t vertexB = polygon[bestJ];
+            const uint32_t vertexC = polygon[bestK];
+            
+            result.indices.insert(result.indices.end(), {vertexA, vertexB, vertexC});
+            result.totalEdgeLength += trianglePerimeter(vertices, vertexA, vertexB, vertexC);
+            
+            // Build sub-polygons from the arcs between selected vertices
+            auto buildArc = [&](size_t arcStart, size_t arcEnd) -> std::vector<uint32_t> {
+                std::vector<uint32_t> arc;
+                if (arcStart <= arcEnd) {
+                    arc.insert(arc.end(),
+                               polygon.begin() + static_cast<ptrdiff_t>(arcStart),
+                               polygon.begin() + static_cast<ptrdiff_t>(arcEnd + 1));
+                } else {
+                    arc.insert(arc.end(),
+                               polygon.begin() + static_cast<ptrdiff_t>(arcStart),
+                               polygon.end());
+                    arc.insert(arc.end(),
+                               polygon.begin(),
+                               polygon.begin() + static_cast<ptrdiff_t>(arcEnd + 1));
+                }
+                return arc;
+            };
+            
+            // Three arcs: A→B, B→C, C→A (indices are in increasing order)
+            const auto arcAB = buildArc(bestI, bestJ);
+            const auto arcBC = buildArc(bestJ, bestK);
+            const auto arcCA = buildArc(bestK, bestI);
+            
+            // Recurse on arcs with 3+ vertices
+            if (arcAB.size() >= 3) triangulateSubPolygon(arcAB);
+            if (arcBC.size() >= 3) triangulateSubPolygon(arcBC);
+            if (arcCA.size() >= 3) triangulateSubPolygon(arcCA);
         };
-        addEdge(bestI, bestJ);
-        addEdge(bestJ, bestK);
-        addEdge(bestK, bestI);
-    }
+    
+    // Initialize with full polygon indices
+    std::vector<uint32_t> fullPolygon(vertexCount);
+    std::iota(fullPolygon.begin(), fullPolygon.end(), 0);
+    
+    result.indices.reserve((vertexCount - 2) * 3);
+    triangulateSubPolygon(fullPolygon);
     
     return result;
 }

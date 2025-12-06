@@ -24,7 +24,8 @@
                         semiMajorAxis:(float)a
                         semiMinorAxis:(float)b
                   triangulationMethod:(int)method
-                     instanceGridSize:(uint32_t)gridSize;
+                     instanceGridCols:(uint32_t)cols
+                             gridRows:(uint32_t)rows;
 
 - (double)executeFrameAndMeasureGPUTime;
 
@@ -44,6 +45,7 @@ namespace Benchmark {
 // -----------------------------------------------------------------------------
 
 enum class TriangulationMethod {
+    EarClipping,
     MinimumWeight,
     CentroidFan,
     GreedyMaxArea,
@@ -82,14 +84,15 @@ std::pair<float, float> shapeAxes(ShapeType shape);
 struct SceneConfig {
     ShapeType shape = ShapeType::Circle;
     int vertexCount = 100;
-    uint32_t instanceGridSize = 3;  // NxN grid
+    uint32_t instanceGridCols = 3;
+    uint32_t instanceGridRows = 3;
     
     // Computed from shape type
     float semiMajorAxis() const;
     float semiMinorAxis() const;
     
     // Total instances
-    uint32_t totalInstances() const { return instanceGridSize * instanceGridSize; }
+    uint32_t totalInstances() const { return instanceGridCols * instanceGridRows; }
     
     // Human-readable description
     std::string description() const;

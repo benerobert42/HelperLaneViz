@@ -16,6 +16,7 @@ namespace Benchmark {
 
 const char* methodName(TriangulationMethod method) {
     switch (method) {
+        case TriangulationMethod::EarClipping:         return "EarClipping";
         case TriangulationMethod::MinimumWeight:       return "MinimumWeight";
         case TriangulationMethod::CentroidFan:         return "CentroidFan";
         case TriangulationMethod::GreedyMaxArea:       return "GreedyMaxArea";
@@ -68,7 +69,7 @@ float SceneConfig::semiMinorAxis() const {
 std::string SceneConfig::description() const {
     char buffer[256];
     snprintf(buffer, sizeof(buffer), "%s, %d verts, %dx%d instances",
-             shapeName(shape), vertexCount, instanceGridSize, instanceGridSize);
+             shapeName(shape), vertexCount, instanceGridCols, instanceGridRows);
     return std::string(buffer);
 }
 
@@ -99,7 +100,8 @@ BenchmarkConfig BenchmarkConfig::standardTestMatrix() {
                 SceneConfig scene;
                 scene.shape = shape;
                 scene.vertexCount = vertexCount;
-                scene.instanceGridSize = gridSize;
+                scene.instanceGridCols = gridSize;
+                scene.instanceGridRows = gridSize;
                 config.scenes.push_back(scene);
             }
         }
@@ -125,7 +127,8 @@ BenchmarkConfig BenchmarkConfig::quickTest() {
                 SceneConfig scene;
                 scene.shape = shape;
                 scene.vertexCount = vertexCount;
-                scene.instanceGridSize = gridSize;
+                scene.instanceGridCols = gridSize;
+                scene.instanceGridRows = gridSize;
                 config.scenes.push_back(scene);
             }
         }
@@ -221,7 +224,8 @@ BenchmarkResults runBenchmark(id<BenchmarkFrameExecutor> executor,
                                                                semiMajorAxis:scene.semiMajorAxis()
                                                                semiMinorAxis:scene.semiMinorAxis()
                                                          triangulationMethod:m
-                                                            instanceGridSize:scene.instanceGridSize];
+                                                            instanceGridCols:scene.instanceGridCols
+                                                                    gridRows:scene.instanceGridRows];
             methodResult.triangulationTimeMs = triangulationTime * 1000.0;
             
             // Get mesh data for metrics
@@ -314,8 +318,8 @@ void BenchmarkResults::printSummary() const {
         printf("│ %-27s │", "Triangulation Method");
         for (const auto* scene : shapeScenes) {
             char header[32];
-            snprintf(header, sizeof(header), "%dv × %d²",
-                     scene->config.vertexCount, scene->config.instanceGridSize);
+            snprintf(header, sizeof(header), "%dv × %dx%d",
+                     scene->config.vertexCount, scene->config.instanceGridCols, scene->config.instanceGridRows);
             printf(" %-15s │", header);
         }
         printf("\n");
@@ -393,7 +397,7 @@ std::string BenchmarkResults::toCSV() const {
     std::string csv;
     
     // Header
-    csv += "Shape,VertexCount,InstanceGrid,TotalInstances,Method,";
+    csv += "Shape,VertexCount,GridCols,GridRows,TotalInstances,Method,";
     csv += "GPU_Mean_ms,GPU_StdDev_ms,GPU_Min_ms,GPU_Max_ms,";
     csv += "Triangles,Edges,EdgeLength,TotalArea,";
     csv += "TileOverlaps,NonEmptyTiles,BCI,";
@@ -404,7 +408,7 @@ std::string BenchmarkResults::toCSV() const {
         for (const auto& r : scene.methodResults) {
             char line[1024];
             snprintf(line, sizeof(line),
-                     "%s,%d,%d,%d,%s,"
+                     "%s,%d,%d,%d,%d,%s,"
                      "%.4f,%.4f,%.4f,%.4f,"
                      "%zu,%zu,%.6f,%.2f,"
                      "%.0f,%zu,%.3f,"
@@ -412,7 +416,8 @@ std::string BenchmarkResults::toCSV() const {
                      "%.4f\n",
                      shapeName(scene.config.shape),
                      scene.config.vertexCount,
-                     scene.config.instanceGridSize,
+                     scene.config.instanceGridCols,
+                     scene.config.instanceGridRows,
                      scene.config.totalInstances(),
                      methodName(r.method),
                      r.gpuTimeMs_Mean, r.gpuTimeMs_StdDev, r.gpuTimeMs_Min, r.gpuTimeMs_Max,
