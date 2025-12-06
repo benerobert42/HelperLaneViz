@@ -42,7 +42,6 @@ inline double triangleArea(const std::vector<Vertex>& vertices,
     return std::abs(simd_cross(ab, ac).z) * 0.5;
 }
 
-// Signed area of the polygon (positive = CCW, negative = CW)
 inline double polygonSignedArea(const std::vector<Vertex>& vertices) {
     const size_t vertexCount = vertices.size();
     double signedAreaSum = 0.0;
@@ -54,7 +53,7 @@ inline double polygonSignedArea(const std::vector<Vertex>& vertices) {
                        - static_cast<double>(current.y) * static_cast<double>(next.x);
     }
     
-    return 0.5 * signedAreaSum;
+    return 0.5 * signedAreaSum; // positive = CCW, negative = CW
 }
 
 // Check if triangle (A, B, C) has counter-clockwise orientation
@@ -275,21 +274,32 @@ inline std::vector<uint32_t> buildCCWOrder(const std::vector<Vertex>& vertices) 
 
 } // anonymous namespace
 
+// MARK: - Edge Length Calculation
+
+double calculateTotalEdgeLength(const std::vector<Vertex>& vertices,
+                                const std::vector<uint32_t>& indices) {
+    double total = 0.0;
+    for (size_t i = 0; i < indices.size(); i += 3) {
+        total += trianglePerimeter(vertices, indices[i], indices[i+1], indices[i+2]);
+    }
+    return total;
+}
+
 // MARK: - Triangulation Implementations
 
-Result earClippingTriangulation(const std::vector<Vertex>& vertices) {
-    Result result;
+std::vector<uint32_t> earClippingTriangulation(const std::vector<Vertex>& vertices) {
+    std::vector<uint32_t> indices;
     const size_t n = vertices.size();
     
-    if (n < 3) return result;
-    
+    if (n < 3) return indices;
+
     const bool isCCW = polygonSignedArea(vertices) >= 0.0;
     
     // Working list of remaining vertex indices
     std::vector<uint32_t> polygon(n);
     std::iota(polygon.begin(), polygon.end(), 0);
     
-    result.indices.reserve((n - 2) * 3);
+    indices.reserve((n - 2) * 3);
     
     // Clip ears until only 3 vertices remain
     while (polygon.size() > 3) {
@@ -302,9 +312,9 @@ Result earClippingTriangulation(const std::vector<Vertex>& vertices) {
             
             if (isValidEar(vertices, polygon, prev, i, next, isCCW)) {
                 // Emit triangle
-                result.indices.push_back(polygon[prev]);
-                result.indices.push_back(polygon[i]);
-                result.indices.push_back(polygon[next]);
+                indices.push_back(polygon[prev]);
+                indices.push_back(polygon[i]);
+                indices.push_back(polygon[next]);
                 
                 // Remove the ear vertex
                 polygon.erase(polygon.begin() + static_cast<ptrdiff_t>(i));
@@ -318,20 +328,20 @@ Result earClippingTriangulation(const std::vector<Vertex>& vertices) {
     
     // Add final triangle
     if (polygon.size() == 3) {
-        result.indices.push_back(polygon[0]);
-        result.indices.push_back(polygon[1]);
-        result.indices.push_back(polygon[2]);
+        indices.push_back(polygon[0]);
+        indices.push_back(polygon[1]);
+        indices.push_back(polygon[2]);
     }
     
-    return result;
+    return indices;
 }
 
-Result minimumWeightTriangulation(const std::vector<Vertex>& vertices) {
-    Result result;
+std::vector<uint32_t> minimumWeightTriangulation(const std::vector<Vertex>& vertices) {
+    std::vector<uint32_t> indices;
     const int vertexCount = static_cast<int>(vertices.size());
     
     if (vertexCount < 3) {
-        return result;
+        return indices;
     }
     
     // DP tables:
@@ -390,21 +400,16 @@ Result minimumWeightTriangulation(const std::vector<Vertex>& vertices) {
     }
     
     // Reconstruct triangles via recursive traversal
-    result.indices.reserve(3 * (vertexCount - 2));
+    indices.reserve(3 * (vertexCount - 2));
     
     std::function<void(int, int)> emitTriangles = [&](int startIndex, int endIndex) {
         const int splitPoint = split(startIndex, endIndex);
         if (splitPoint < 0) return;
         
         // Emit triangle (startIndex, splitPoint, endIndex)
-        result.indices.push_back(static_cast<uint32_t>(startIndex));
-        result.indices.push_back(static_cast<uint32_t>(splitPoint));
-        result.indices.push_back(static_cast<uint32_t>(endIndex));
-        
-        result.totalEdgeLength += trianglePerimeter(vertices,
-                                                    static_cast<uint32_t>(startIndex),
-                                                    static_cast<uint32_t>(splitPoint),
-                                                    static_cast<uint32_t>(endIndex));
+        indices.push_back(static_cast<uint32_t>(startIndex));
+        indices.push_back(static_cast<uint32_t>(splitPoint));
+        indices.push_back(static_cast<uint32_t>(endIndex));
         
         emitTriangles(startIndex, splitPoint);
         emitTriangles(splitPoint, endIndex);
@@ -412,15 +417,15 @@ Result minimumWeightTriangulation(const std::vector<Vertex>& vertices) {
     
     emitTriangles(0, vertexCount - 1);
     
-    return result;
+    return indices;
 }
 
-Result centroidFanTriangulation(std::vector<Vertex>& vertices) {
-    Result result;
+std::vector<uint32_t> centroidFanTriangulation(std::vector<Vertex>& vertices) {
+    std::vector<uint32_t> indices;
     const size_t originalVertexCount = vertices.size();
     
     if (originalVertexCount < 3) {
-        return result;
+        return indices;
     }
     
     // Compute centroid by averaging all vertex positions
@@ -438,48 +443,47 @@ Result centroidFanTriangulation(std::vector<Vertex>& vertices) {
     const uint32_t centroidIndex = static_cast<uint32_t>(vertices.size() - 1);
     
     // Create fan triangles connecting each edge to the centroid
-    result.indices.reserve(originalVertexCount * 3);
-    
+    indices.reserve(originalVertexCount * 3);
+
     for (uint32_t i = 0; i < originalVertexCount; ++i) {
         const uint32_t nextIndex = (i + 1) % static_cast<uint32_t>(originalVertexCount);
         
         // Triangle (current, next, centroid) maintains CCW orientation for CCW input
-        result.indices.push_back(i);
-        result.indices.push_back(nextIndex);
-        result.indices.push_back(centroidIndex);
-        
-        result.totalEdgeLength += trianglePerimeter(vertices, i, nextIndex, centroidIndex);
+        indices.push_back(i);
+        indices.push_back(nextIndex);
+        indices.push_back(centroidIndex);
     }
     
-    return result;
+    return indices;
 }
 
-Result greedyMaxAreaTriangulation(const std::vector<Vertex>& vertices) {
-    Result result;
+std::vector<uint32_t> greedyMaxAreaTriangulation(const std::vector<Vertex>& vertices) {
+    std::vector<uint32_t> indices;
     const size_t vertexCount = vertices.size();
     
     if (vertexCount < 3) {
-        return result;
+        return indices;
     }
-    
+
     // Recursive solver: triangulates a convex sub-polygon by selecting the largest triangle
     std::function<void(const std::vector<uint32_t>&)> triangulateSubPolygon =
         [&](const std::vector<uint32_t>& polygon) {
             const size_t polygonSize = polygon.size();
             
-            if (polygonSize < 3) return;
-            
-            // Base case: exactly one triangle
+            if (polygonSize < 3) {
+                return;
+            }
+
             if (polygonSize == 3) {
-                result.indices.insert(result.indices.end(), {polygon[0], polygon[1], polygon[2]});
-                result.totalEdgeLength += trianglePerimeter(vertices, polygon[0], polygon[1], polygon[2]);
+                indices.insert(indices.end(), {polygon[0], polygon[1], polygon[2]});
                 return;
             }
             
             // Find the largest-area triangle among all valid triples
             double largestArea = -1.0;
             size_t bestI = 0, bestJ = 1, bestK = 2;
-            
+
+            // Triple for loop? xd
             for (size_t i = 0; i + 2 < polygonSize; ++i) {
                 for (size_t j = i + 1; j + 1 < polygonSize; ++j) {
                     for (size_t k = j + 1; k < polygonSize; ++k) {
@@ -508,8 +512,7 @@ Result greedyMaxAreaTriangulation(const std::vector<Vertex>& vertices) {
             const uint32_t vertexB = polygon[bestJ];
             const uint32_t vertexC = polygon[bestK];
             
-            result.indices.insert(result.indices.end(), {vertexA, vertexB, vertexC});
-            result.totalEdgeLength += trianglePerimeter(vertices, vertexA, vertexB, vertexC);
+            indices.insert(indices.end(), {vertexA, vertexB, vertexC});
             
             // Build sub-polygons from the arcs between selected vertices
             auto buildArc = [&](size_t arcStart, size_t arcEnd) -> std::vector<uint32_t> {
@@ -544,18 +547,18 @@ Result greedyMaxAreaTriangulation(const std::vector<Vertex>& vertices) {
     std::vector<uint32_t> fullPolygon(vertexCount);
     std::iota(fullPolygon.begin(), fullPolygon.end(), 0);
     
-    result.indices.reserve((vertexCount - 2) * 3);
+    indices.reserve((vertexCount - 2) * 3);
     triangulateSubPolygon(fullPolygon);
     
-    return result;
+    return indices;
 }
 
-Result stripTriangulation(const std::vector<Vertex>& vertices) {
-    Result result;
+std::vector<uint32_t> stripTriangulation(const std::vector<Vertex>& vertices) {
+    std::vector<uint32_t> indices;
     const size_t vertexCount = vertices.size();
     
     if (vertexCount < 3) {
-        return result;
+        return indices;
     }
     
     const bool isClockwise = polygonSignedArea(vertices) < 0.0;
@@ -574,7 +577,7 @@ Result stripTriangulation(const std::vector<Vertex>& vertices) {
     }
     
     // Generate triangles from consecutive strip triplets
-    result.indices.reserve((vertexCount - 2) * 3);
+    indices.reserve((vertexCount - 2) * 3);
     
     for (size_t i = 0; i + 2 < stripOrder.size(); ++i) {
         uint32_t indexA = stripOrder[i];
@@ -587,25 +590,22 @@ Result stripTriangulation(const std::vector<Vertex>& vertices) {
             std::swap(indexA, indexB);
         }
         
-        result.indices.push_back(indexA);
-        result.indices.push_back(indexB);
-        result.indices.push_back(indexC);
-        
-        result.totalEdgeLength += trianglePerimeter(vertices, indexA, indexB, indexC);
+        indices.push_back(indexA);
+        indices.push_back(indexB);
+        indices.push_back(indexC);
     }
     
-    return result;
+    return indices;
 }
 
-Result maxMinAreaTriangulation(const std::vector<Vertex>& vertices) {
-    Result result;
+std::vector<uint32_t> maxMinAreaTriangulation(const std::vector<Vertex>& vertices) {
+    std::vector<uint32_t> indices;
     const int vertexCount = static_cast<int>(vertices.size());
     
     if (vertexCount < 3) {
-        return result;
+        return indices;
     }
     
-    // Ensure CCW traversal order
     const std::vector<uint32_t> ccwOrder = buildCCWOrder(vertices);
     
     // DP tables: dp[i][j] = maximum achievable minimum triangle area for chain [i, j]
@@ -660,7 +660,7 @@ Result maxMinAreaTriangulation(const std::vector<Vertex>& vertices) {
     }
     
     // Reconstruct triangles with CCW orientation
-    result.indices.reserve(3 * (vertexCount - 2));
+    indices.reserve(3 * (vertexCount - 2));
     
     std::function<void(int, int)> emitTriangles = [&](int startIndex, int endIndex) {
         const int splitPoint = split(startIndex, endIndex);
@@ -675,10 +675,9 @@ Result maxMinAreaTriangulation(const std::vector<Vertex>& vertices) {
             std::swap(indexB, indexC);
         }
         
-        result.indices.push_back(indexA);
-        result.indices.push_back(indexB);
-        result.indices.push_back(indexC);
-        result.totalEdgeLength += trianglePerimeter(vertices, indexA, indexB, indexC);
+        indices.push_back(indexA);
+        indices.push_back(indexB);
+        indices.push_back(indexC);
         
         emitTriangles(startIndex, splitPoint);
         emitTriangles(splitPoint, endIndex);
@@ -686,18 +685,17 @@ Result maxMinAreaTriangulation(const std::vector<Vertex>& vertices) {
     
     emitTriangles(0, vertexCount - 1);
     
-    return result;
+    return indices;
 }
 
-Result minMaxAreaTriangulation(const std::vector<Vertex>& vertices) {
-    Result result;
+std::vector<uint32_t> minMaxAreaTriangulation(const std::vector<Vertex>& vertices) {
+    std::vector<uint32_t> indices;
     const int vertexCount = static_cast<int>(vertices.size());
     
     if (vertexCount < 3) {
-        return result;
+        return indices;
     }
     
-    // Ensure CCW traversal order
     const std::vector<uint32_t> ccwOrder = buildCCWOrder(vertices);
     
     // DP tables: dp[i][j] = minimum achievable maximum triangle area for chain [i, j]
@@ -751,7 +749,7 @@ Result minMaxAreaTriangulation(const std::vector<Vertex>& vertices) {
     }
     
     // Reconstruct triangles with CCW orientation
-    result.indices.reserve(3 * (vertexCount - 2));
+    indices.reserve(3 * (vertexCount - 2));
     
     std::function<void(int, int)> emitTriangles = [&](int startIndex, int endIndex) {
         const int splitPoint = split(startIndex, endIndex);
@@ -766,10 +764,9 @@ Result minMaxAreaTriangulation(const std::vector<Vertex>& vertices) {
             std::swap(indexB, indexC);
         }
         
-        result.indices.push_back(indexA);
-        result.indices.push_back(indexB);
-        result.indices.push_back(indexC);
-        result.totalEdgeLength += trianglePerimeter(vertices, indexA, indexB, indexC);
+        indices.push_back(indexA);
+        indices.push_back(indexB);
+        indices.push_back(indexC);
         
         emitTriangles(startIndex, splitPoint);
         emitTriangles(splitPoint, endIndex);
@@ -777,7 +774,7 @@ Result minMaxAreaTriangulation(const std::vector<Vertex>& vertices) {
     
     emitTriangles(0, vertexCount - 1);
     
-    return result;
+    return indices;
 }
 
 std::vector<uint32_t> constrainedDelaunay(const std::vector<Vertex>& vertices) {
@@ -812,95 +809,6 @@ std::vector<uint32_t> constrainedDelaunay(const std::vector<Vertex>& vertices) {
     // Convert face matrix to flat index array
     std::vector<uint32_t> triangleIndices;
     triangleIndices.reserve(static_cast<size_t>(outputFaces.rows()) * 3);
-    
-    for (int faceIndex = 0; faceIndex < outputFaces.rows(); ++faceIndex) {
-        triangleIndices.push_back(static_cast<uint32_t>(outputFaces(faceIndex, 0)));
-        triangleIndices.push_back(static_cast<uint32_t>(outputFaces(faceIndex, 1)));
-        triangleIndices.push_back(static_cast<uint32_t>(outputFaces(faceIndex, 2)));
-    }
-    
-    return triangleIndices;
-}
-
-std::vector<uint32_t> constrainedDelaunayWithHoles(
-    const std::vector<Vertex>& outerBoundary,
-    const std::vector<std::vector<Vertex>>& holes)
-{
-    if (outerBoundary.size() < 3) return {};
-    
-    // Count total vertices
-    size_t totalVertices = outerBoundary.size();
-    size_t totalEdges = outerBoundary.size();
-    for (const auto& hole : holes) {
-        totalVertices += hole.size();
-        totalEdges += hole.size();
-    }
-    
-    // Build combined vertex matrix
-    Eigen::Matrix<double, Eigen::Dynamic, 2> inputVertices(totalVertices, 2);
-    Eigen::Matrix<int, Eigen::Dynamic, 2> boundaryEdges(totalEdges, 2);
-    
-    int vertexIdx = 0;
-    int edgeIdx = 0;
-    
-    // Add outer boundary vertices and edges
-    const int outerStart = vertexIdx;
-    for (size_t i = 0; i < outerBoundary.size(); ++i) {
-        inputVertices(vertexIdx, 0) = outerBoundary[i].position.x;
-        inputVertices(vertexIdx, 1) = outerBoundary[i].position.y;
-        vertexIdx++;
-    }
-    for (size_t i = 0; i < outerBoundary.size(); ++i) {
-        boundaryEdges(edgeIdx, 0) = outerStart + static_cast<int>(i);
-        boundaryEdges(edgeIdx, 1) = outerStart + static_cast<int>((i + 1) % outerBoundary.size());
-        edgeIdx++;
-    }
-    
-    // Add hole vertices and edges, compute hole interior points
-    Eigen::Matrix<double, Eigen::Dynamic, 2> holePoints(holes.size(), 2);
-    
-    for (size_t h = 0; h < holes.size(); ++h) {
-        const auto& hole = holes[h];
-        if (hole.size() < 3) continue;
-        
-        const int holeStart = vertexIdx;
-        
-        // Add hole vertices
-        for (size_t i = 0; i < hole.size(); ++i) {
-            inputVertices(vertexIdx, 0) = hole[i].position.x;
-            inputVertices(vertexIdx, 1) = hole[i].position.y;
-            vertexIdx++;
-        }
-        
-        // Add hole edges
-        for (size_t i = 0; i < hole.size(); ++i) {
-            boundaryEdges(edgeIdx, 0) = holeStart + static_cast<int>(i);
-            boundaryEdges(edgeIdx, 1) = holeStart + static_cast<int>((i + 1) % hole.size());
-            edgeIdx++;
-        }
-        
-        // Compute centroid as hole marker point
-        double cx = 0, cy = 0;
-        for (const auto& v : hole) {
-            cx += v.position.x;
-            cy += v.position.y;
-        }
-        holePoints(h, 0) = cx / hole.size();
-        holePoints(h, 1) = cy / hole.size();
-    }
-    
-    // Triangle flags: p = PSLG mode, Q = quiet, z = zero-indexed
-    const std::string triangleFlags = "pQz";
-    
-    Eigen::Matrix<double, Eigen::Dynamic, 2> outputVertices;
-    Eigen::Matrix<int, Eigen::Dynamic, 3> outputFaces;
-    
-    igl::triangle::triangulate(inputVertices, boundaryEdges, holePoints, triangleFlags,
-                               outputVertices, outputFaces);
-    
-    // Convert to index array
-    std::vector<uint32_t> triangleIndices;
-    triangleIndices.reserve(outputFaces.rows() * 3);
     
     for (int faceIndex = 0; faceIndex < outputFaces.rows(); ++faceIndex) {
         triangleIndices.push_back(static_cast<uint32_t>(outputFaces(faceIndex, 0)));
