@@ -107,9 +107,26 @@ inline bool pointInsidePolygon(const simd_float3& p, const std::vector<Vertex>& 
     return (crossings % 2) == 1;
 }
 
+// Check if two line segments intersect (excluding endpoints)
+inline bool segmentsIntersect(const simd_float3& p1, const simd_float3& p2,
+                               const simd_float3& q1, const simd_float3& q2) {
+    const double d1 = cross2D(p1, p2, q1);
+    const double d2 = cross2D(p1, p2, q2);
+    const double d3 = cross2D(q1, q2, p1);
+    const double d4 = cross2D(q1, q2, p2);
+    
+    // Segments intersect if points are on opposite sides
+    if ((d1 > 0 && d2 < 0) || (d1 < 0 && d2 > 0)) {
+        if ((d3 > 0 && d4 < 0) || (d3 < 0 && d4 > 0)) {
+            return true;
+        }
+    }
+    return false;
+}
+
 // Simplified: Check if triangle is inside polygon (for concave polygons)
 // Assumes triangle vertices are on polygon boundary
-// Based on computational geometry best practices: check center + vertex containment
+// Based on computational geometry best practices: check center + vertex containment + edge validity
 inline bool isTriangleInsidePolygon(const std::vector<Vertex>& vertices, int i, int j, int k) {
     const auto& pA = vertices[i].position;
     const auto& pB = vertices[j].position;
@@ -128,6 +145,55 @@ inline bool isTriangleInsidePolygon(const std::vector<Vertex>& vertices, int i, 
         if (v == i || v == j || v == k) continue;
         if (pointInTriangle(vertices[v].position, pA, pB, pC)) {
             return false; // Another vertex inside = invalid
+        }
+    }
+    
+    // Check that triangle edges don't cross polygon boundary
+    // Only check edges that are not consecutive (diagonals)
+    auto isConsecutive = [n](int a, int b) -> bool {
+        return (a + 1) % n == b || (b + 1) % n == a;
+    };
+    
+    // Check edge AB
+    if (!isConsecutive(i, j)) {
+        for (int e = 0; e < n; ++e) {
+            int nextE = (e + 1) % n;
+            // Skip if this edge is one of our triangle edges
+            if ((e == i && nextE == j) || (e == j && nextE == i)) continue;
+            if ((e == j && nextE == k) || (e == k && nextE == j)) continue;
+            if ((e == k && nextE == i) || (e == i && nextE == k)) continue;
+            
+            if (segmentsIntersect(pA, pB, vertices[e].position, vertices[nextE].position)) {
+                return false; // Edge AB crosses polygon boundary
+            }
+        }
+    }
+    
+    // Check edge BC
+    if (!isConsecutive(j, k)) {
+        for (int e = 0; e < n; ++e) {
+            int nextE = (e + 1) % n;
+            if ((e == i && nextE == j) || (e == j && nextE == i)) continue;
+            if ((e == j && nextE == k) || (e == k && nextE == j)) continue;
+            if ((e == k && nextE == i) || (e == i && nextE == k)) continue;
+            
+            if (segmentsIntersect(pB, pC, vertices[e].position, vertices[nextE].position)) {
+                return false; // Edge BC crosses polygon boundary
+            }
+        }
+    }
+    
+    // Check edge CA
+    if (!isConsecutive(k, i)) {
+        for (int e = 0; e < n; ++e) {
+            int nextE = (e + 1) % n;
+            if ((e == i && nextE == j) || (e == j && nextE == i)) continue;
+            if ((e == j && nextE == k) || (e == k && nextE == j)) continue;
+            if ((e == k && nextE == i) || (e == i && nextE == k)) continue;
+            
+            if (segmentsIntersect(pC, pA, vertices[e].position, vertices[nextE].position)) {
+                return false; // Edge CA crosses polygon boundary
+            }
         }
     }
     
@@ -466,9 +532,12 @@ std::vector<uint32_t> greedyMaxAreaTriangulation(const std::vector<Vertex>& vert
         return indices;
     }
 
-    // Recursive solver: triangulates a convex sub-polygon by selecting the largest triangle
-    std::function<void(const std::vector<uint32_t>&)> triangulateSubPolygon =
-        [&](const std::vector<uint32_t>& polygon) {
+    const std::vector<uint32_t> ccwOrder = buildCCWOrder(vertices);
+
+    // Recursive solver: triangulates a sub-polygon by selecting the largest triangle
+    // polygon is indices into ccwOrder array (which gives actual vertex indices)
+    std::function<void(const std::vector<size_t>&)> triangulateSubPolygon =
+        [&](const std::vector<size_t>& polygon) {
             const size_t polygonSize = polygon.size();
             
             if (polygonSize < 3) {
@@ -476,21 +545,24 @@ std::vector<uint32_t> greedyMaxAreaTriangulation(const std::vector<Vertex>& vert
             }
 
             if (polygonSize == 3) {
-                indices.insert(indices.end(), {polygon[0], polygon[1], polygon[2]});
+                uint32_t va = ccwOrder[polygon[0]];
+                uint32_t vb = ccwOrder[polygon[1]];
+                uint32_t vc = ccwOrder[polygon[2]];
+                indices.insert(indices.end(), {va, vb, vc});
                 return;
             }
             
             // Find the largest-area triangle among all valid triples
+            // polygon array is in boundary order (contiguous arc), so try all combinations
             double largestArea = -1.0;
             size_t bestI = 0, bestJ = 1, bestK = 2;
 
-            // Triple for loop? xd
             for (size_t i = 0; i + 2 < polygonSize; ++i) {
                 for (size_t j = i + 1; j + 1 < polygonSize; ++j) {
                     for (size_t k = j + 1; k < polygonSize; ++k) {
-                        uint32_t vi = polygon[i];
-                        uint32_t vj = polygon[j];
-                        uint32_t vk = polygon[k];
+                        uint32_t vi = ccwOrder[polygon[i]];
+                        uint32_t vj = ccwOrder[polygon[j]];
+                        uint32_t vk = ccwOrder[polygon[k]];
                         
                         // Skip invalid triangles (outside polygon or containing other vertices)
                         if (!isTriangleInsidePolygon(vertices, static_cast<int>(vi), static_cast<int>(vj), static_cast<int>(vk))) {
@@ -508,35 +580,53 @@ std::vector<uint32_t> greedyMaxAreaTriangulation(const std::vector<Vertex>& vert
                 }
             }
             
+            if (largestArea < 0) return; // No valid triangle found
+            
             // Emit the selected triangle
-            const uint32_t vertexA = polygon[bestI];
-            const uint32_t vertexB = polygon[bestJ];
-            const uint32_t vertexC = polygon[bestK];
+            const uint32_t vertexA = ccwOrder[polygon[bestI]];
+            const uint32_t vertexB = ccwOrder[polygon[bestJ]];
+            const uint32_t vertexC = ccwOrder[polygon[bestK]];
             
             indices.insert(indices.end(), {vertexA, vertexB, vertexC});
             
-            // Build sub-polygons from the arcs between selected vertices
-            auto buildArc = [&](size_t arcStart, size_t arcEnd) -> std::vector<uint32_t> {
-                std::vector<uint32_t> arc;
-                if (arcStart <= arcEnd) {
-                    arc.insert(arc.end(),
-                               polygon.begin() + static_cast<ptrdiff_t>(arcStart),
-                               polygon.begin() + static_cast<ptrdiff_t>(arcEnd + 1));
+            // Build sub-polygons from the arcs between selected vertices (respecting boundary order)
+            // The polygon array represents a contiguous arc, so we need to handle wrap-around correctly
+            auto buildArc = [&](size_t startIdx, size_t endIdx) -> std::vector<size_t> {
+                std::vector<size_t> arc;
+                if (startIdx < endIdx) {
+                    // Normal case: arc from startIdx to endIdx (inclusive)
+                    for (size_t i = startIdx; i <= endIdx; ++i) {
+                        arc.push_back(polygon[i]);
+                    }
+                } else if (startIdx > endIdx) {
+                    // Wrap-around case: from startIdx to end of array, then from start to endIdx
+                    for (size_t i = startIdx; i < polygonSize; ++i) {
+                        arc.push_back(polygon[i]);
+                    }
+                    for (size_t i = 0; i <= endIdx; ++i) {
+                        arc.push_back(polygon[i]);
+                    }
                 } else {
-                    arc.insert(arc.end(),
-                               polygon.begin() + static_cast<ptrdiff_t>(arcStart),
-                               polygon.end());
-                    arc.insert(arc.end(),
-                               polygon.begin(),
-                               polygon.begin() + static_cast<ptrdiff_t>(arcEnd + 1));
+                    // startIdx == endIdx: single vertex, return empty (will be filtered)
+                    arc.push_back(polygon[startIdx]);
                 }
                 return arc;
             };
             
-            // Three arcs: A→B, B→C, C→A (indices are in increasing order)
+            // Three arcs: A→B, B→C, C→A (respecting boundary order)
+            // Note: bestI < bestJ < bestK in the polygon array (since we iterate in order)
+            // Each arc includes both endpoints to form closed sub-polygons
             const auto arcAB = buildArc(bestI, bestJ);
             const auto arcBC = buildArc(bestJ, bestK);
-            const auto arcCA = buildArc(bestK, bestI);
+            // arcCA wraps from bestK back to bestI (closed polygon)
+            std::vector<size_t> arcCA;
+            arcCA.push_back(polygon[bestK]);  // Include endpoint
+            for (size_t i = bestK + 1; i < polygonSize; ++i) {
+                arcCA.push_back(polygon[i]);
+            }
+            for (size_t i = 0; i <= bestI; ++i) {
+                arcCA.push_back(polygon[i]);  // Include endpoint
+            }
             
             // Recurse on arcs with 3+ vertices
             if (arcAB.size() >= 3) triangulateSubPolygon(arcAB);
@@ -544,8 +634,8 @@ std::vector<uint32_t> greedyMaxAreaTriangulation(const std::vector<Vertex>& vert
             if (arcCA.size() >= 3) triangulateSubPolygon(arcCA);
         };
     
-    // Initialize with full polygon indices
-    std::vector<uint32_t> fullPolygon(vertexCount);
+    // Initialize with full polygon (indices into ccwOrder)
+    std::vector<size_t> fullPolygon(vertexCount);
     std::iota(fullPolygon.begin(), fullPolygon.end(), 0);
     
     indices.reserve((vertexCount - 2) * 3);
@@ -562,19 +652,21 @@ std::vector<uint32_t> stripTriangulation(const std::vector<Vertex>& vertices) {
         return indices;
     }
     
+    // Ensure CCW order for proper boundary traversal
+    const std::vector<uint32_t> ccwOrder = buildCCWOrder(vertices);
     const bool isClockwise = polygonSignedArea(vertices) < 0.0;
     
-    // Build strip order: alternating from left (0) and right (n-1) ends
+    // Build strip order: alternating from start and end of CCW-ordered polygon
     std::vector<uint32_t> stripOrder;
     stripOrder.reserve(vertexCount);
     
-    uint32_t leftIndex = 0;
-    uint32_t rightIndex = static_cast<uint32_t>(vertexCount - 1);
+    size_t leftIdx = 0;
+    size_t rightIdx = vertexCount - 1;
     
-    while (leftIndex <= rightIndex) {
-        stripOrder.push_back(leftIndex++);
-        if (leftIndex > rightIndex) break;
-        stripOrder.push_back(rightIndex--);
+    while (leftIdx <= rightIdx) {
+        stripOrder.push_back(ccwOrder[leftIdx++]);
+        if (leftIdx > rightIdx) break;
+        stripOrder.push_back(ccwOrder[rightIdx--]);
     }
     
     // Generate triangles from consecutive strip triplets
