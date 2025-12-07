@@ -87,22 +87,6 @@ inline bool pointInTriangle(const simd_float3& p,
     return !(hasNeg && hasPos);
 }
 
-// Check if two segments (p1-p2) and (p3-p4) properly intersect (cross each other)
-inline bool segmentsIntersect(const simd_float3& p1, const simd_float3& p2,
-                              const simd_float3& p3, const simd_float3& p4) {
-    const double d1 = cross2D(p3, p4, p1);
-    const double d2 = cross2D(p3, p4, p2);
-    const double d3 = cross2D(p1, p2, p3);
-    const double d4 = cross2D(p1, p2, p4);
-    
-    // Check for proper intersection (segments cross each other)
-    if (((d1 > 0 && d2 < 0) || (d1 < 0 && d2 > 0)) &&
-        ((d3 > 0 && d4 < 0) || (d3 < 0 && d4 > 0))) {
-        return true;
-    }
-    return false;
-}
-
 // Ray casting point-in-polygon test
 inline bool pointInsidePolygon(const simd_float3& p, const std::vector<Vertex>& vertices) {
     const size_t n = vertices.size();
@@ -123,58 +107,30 @@ inline bool pointInsidePolygon(const simd_float3& p, const std::vector<Vertex>& 
     return (crossings % 2) == 1;
 }
 
-// Check if diagonal from vertex i to vertex j is valid (inside polygon, doesn't cross edges)
-inline bool isDiagonalValid(const std::vector<Vertex>& vertices, int i, int j) {
-    const int n = static_cast<int>(vertices.size());
-    if (n < 3) return false;
-    
-    i = ((i % n) + n) % n;
-    j = ((j % n) + n) % n;
-    
-    if (i == j) return false;
-    
-    // Adjacent vertices are always valid (boundary edges)
-    int diff = std::abs(i - j);
-    if (diff == 1 || diff == n - 1) return true;
-    
-    const auto& pi = vertices[i].position;
-    const auto& pj = vertices[j].position;
-    
-    // Check if diagonal intersects any polygon edge
-    for (int k = 0; k < n; ++k) {
-        int next = (k + 1) % n;
-        if (k == i || k == j || next == i || next == j) continue;
-        
-        const auto& pk = vertices[k].position;
-        const auto& pnext = vertices[next].position;
-        
-        if (segmentsIntersect(pi, pj, pk, pnext)) {
-            return false;
-        }
-    }
-    
-    // Check if midpoint is inside polygon
-    simd_float3 midpoint = {(pi.x + pj.x) * 0.5f, (pi.y + pj.y) * 0.5f, 1.0f};
-    return pointInsidePolygon(midpoint, vertices);
-}
-
-// Check if triangle (i, j, k) is valid: diagonals don't cross edges, no vertices inside
-inline bool isTriangleValidForPolygon(const std::vector<Vertex>& vertices, int i, int j, int k) {
-    if (!isDiagonalValid(vertices, i, j)) return false;
-    if (!isDiagonalValid(vertices, j, k)) return false;
-    if (!isDiagonalValid(vertices, k, i)) return false;
-    
+// Simplified: Check if triangle is inside polygon (for concave polygons)
+// Assumes triangle vertices are on polygon boundary
+// Based on computational geometry best practices: check center + vertex containment
+inline bool isTriangleInsidePolygon(const std::vector<Vertex>& vertices, int i, int j, int k) {
     const auto& pA = vertices[i].position;
     const auto& pB = vertices[j].position;
     const auto& pC = vertices[k].position;
     
+    // Check triangle center is inside polygon (single point-in-polygon test)
+    simd_float3 center = {(pA.x + pB.x + pC.x) / 3.0f,
+                         (pA.y + pB.y + pC.y) / 3.0f, 1.0f};
+    if (!pointInsidePolygon(center, vertices)) {
+        return false; // Triangle center outside = triangle outside
+    }
+    
+    // Check no other boundary vertices inside triangle
     const int n = static_cast<int>(vertices.size());
     for (int v = 0; v < n; ++v) {
         if (v == i || v == j || v == k) continue;
         if (pointInTriangle(vertices[v].position, pA, pB, pC)) {
-            return false;
+            return false; // Another vertex inside = invalid
         }
     }
+    
     return true;
 }
 
@@ -272,6 +228,28 @@ inline std::vector<uint32_t> buildCCWOrder(const std::vector<Vertex>& vertices) 
     return order;
 }
 
+// Filter triangles to only keep those inside the polygon (for concave polygons)
+inline std::vector<uint32_t> filterTrianglesToInterior(
+    const std::vector<Vertex>& vertices,
+    const std::vector<uint32_t>& indices) {
+    
+    std::vector<uint32_t> filtered;
+    filtered.reserve(indices.size());
+    
+    for (size_t i = 0; i < indices.size(); i += 3) {
+        uint32_t a = indices[i];
+        uint32_t b = indices[i + 1];
+        uint32_t c = indices[i + 2];
+        
+        if (isTriangleInsidePolygon(vertices, static_cast<int>(a), static_cast<int>(b), static_cast<int>(c))) {
+            filtered.push_back(a);
+            filtered.push_back(b);
+            filtered.push_back(c);
+        }
+    }
+    
+    return filtered;
+}
 } // anonymous namespace
 
 // MARK: - Edge Length Calculation
@@ -371,14 +349,9 @@ std::vector<uint32_t> minimumWeightTriangulation(const std::vector<Vertex>& vert
             int optimalSplit = -1;
             
             for (int splitPoint = startIndex + 1; splitPoint < endIndex; ++splitPoint) {
-                for (int v = 0; v < vertexCount; ++v) {
-                    if (v == startIndex || v == splitPoint || v == endIndex) continue;
-                    if (pointInTriangle(vertices[v].position,
-                                        vertices[startIndex].position,
-                                        vertices[splitPoint].position,
-                                        vertices[endIndex].position)) {
-                        continue;
-                    }
+                // Skip invalid triangles (outside polygon or containing other vertices)
+                if (!isTriangleInsidePolygon(vertices, startIndex, splitPoint, endIndex)) {
+                    continue;
                 }
                 
                 // Cost = left subproblem + right subproblem + new internal edges
@@ -448,10 +421,38 @@ std::vector<uint32_t> centroidFanTriangulation(std::vector<Vertex>& vertices) {
     for (uint32_t i = 0; i < originalVertexCount; ++i) {
         const uint32_t nextIndex = (i + 1) % static_cast<uint32_t>(originalVertexCount);
         
-        // Triangle (current, next, centroid) maintains CCW orientation for CCW input
-        indices.push_back(i);
-        indices.push_back(nextIndex);
-        indices.push_back(centroidIndex);
+        // For concave polygons, check if triangle is inside polygon before adding
+        // Check against original polygon (first originalVertexCount vertices)
+        std::vector<Vertex> originalVertices(vertices.begin(), vertices.begin() + static_cast<ptrdiff_t>(originalVertexCount));
+        
+        // Create temporary triangle with centroid for validation
+        // Note: centroid is not in originalVertices, so we check manually
+        const auto& pA = vertices[i].position;
+        const auto& pB = vertices[nextIndex].position;
+        const auto& pC = vertices[centroidIndex].position;
+        
+        // Check triangle center is inside original polygon
+        simd_float3 center = {(pA.x + pB.x + pC.x) / 3.0f,
+                             (pA.y + pB.y + pC.y) / 3.0f, 1.0f};
+        if (!pointInsidePolygon(center, originalVertices)) {
+            continue; // Triangle center outside = skip
+        }
+        
+        // Check no other boundary vertices inside triangle
+        bool isValid = true;
+        for (size_t v = 0; v < originalVertexCount; ++v) {
+            if (v == i || v == nextIndex) continue;
+            if (pointInTriangle(vertices[v].position, pA, pB, pC)) {
+                isValid = false;
+                break;
+            }
+        }
+        
+        if (isValid) {
+            indices.push_back(i);
+            indices.push_back(nextIndex);
+            indices.push_back(centroidIndex);
+        }
     }
     
     return indices;
@@ -487,16 +488,16 @@ std::vector<uint32_t> greedyMaxAreaTriangulation(const std::vector<Vertex>& vert
             for (size_t i = 0; i + 2 < polygonSize; ++i) {
                 for (size_t j = i + 1; j + 1 < polygonSize; ++j) {
                     for (size_t k = j + 1; k < polygonSize; ++k) {
-                        for (int v = 0; v < vertexCount; ++v) {
-                            if (v == i || v == j || v == k) continue;
-                            if (pointInTriangle(vertices[v].position,
-                                                vertices[i].position,
-                                                vertices[j].position,
-                                                vertices[k].position)) {
-                                continue;
-                            }
+                        uint32_t vi = polygon[i];
+                        uint32_t vj = polygon[j];
+                        uint32_t vk = polygon[k];
+                        
+                        // Skip invalid triangles (outside polygon or containing other vertices)
+                        if (!isTriangleInsidePolygon(vertices, static_cast<int>(vi), static_cast<int>(vj), static_cast<int>(vk))) {
+                            continue;
                         }
-                        const double area = triangleArea(vertices, polygon[i], polygon[j], polygon[k]);
+                        
+                        const double area = triangleArea(vertices, vi, vj, vk);
                         if (area > largestArea) {
                             largestArea = area;
                             bestI = i;
@@ -595,7 +596,8 @@ std::vector<uint32_t> stripTriangulation(const std::vector<Vertex>& vertices) {
         indices.push_back(indexC);
     }
     
-    return indices;
+    // Filter to only keep triangles inside the polygon (important for concave polygons)
+    return filterTrianglesToInterior(vertices, indices);
 }
 
 std::vector<uint32_t> maxMinAreaTriangulation(const std::vector<Vertex>& vertices) {
@@ -639,7 +641,7 @@ std::vector<uint32_t> maxMinAreaTriangulation(const std::vector<Vertex>& vertice
                 const uint32_t originalC = ccwOrder[endIndex];
                 
                 // Skip invalid triangles
-                if (!isTriangleValidForPolygon(vertices, originalA, originalB, originalC)) continue;
+                if (!isTriangleInsidePolygon(vertices, originalA, originalB, originalC)) continue;
                 
                 const double currentTriangleArea = triangleArea(vertices, originalA, originalB, originalC);
                 
@@ -728,7 +730,7 @@ std::vector<uint32_t> minMaxAreaTriangulation(const std::vector<Vertex>& vertice
                 const uint32_t originalC = ccwOrder[endIndex];
                 
                 // Skip invalid triangles
-                if (!isTriangleValidForPolygon(vertices, originalA, originalB, originalC)) continue;
+                if (!isTriangleInsidePolygon(vertices, originalA, originalB, originalC)) continue;
                 
                 const double currentTriangleArea = triangleArea(vertices, originalA, originalB, originalC);
                 

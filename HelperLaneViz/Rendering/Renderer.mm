@@ -281,42 +281,42 @@ static constexpr uint32_t kDefaultTileSize = 32;
 
 - (std::vector<uint32_t>)triangulateVertices:(std::vector<Vertex>&)vertices
                                   withMethod:(TriangulationMethod)method {
-    Triangulation::Result result;
-    
+    std::vector<uint32_t> indices;
+
     switch (method) {
         case TriangulationMethodEarClipping:
-            result = Triangulation::earClippingTriangulation(vertices);
+            indices = Triangulation::earClippingTriangulation(vertices);
             break;
             
         case TriangulationMethodMinimumWeight:
-            result = Triangulation::minimumWeightTriangulation(vertices);
+            indices = Triangulation::minimumWeightTriangulation(vertices);
             break;
             
         case TriangulationMethodCentroidFan:
-            result = Triangulation::centroidFanTriangulation(vertices);
+            indices = Triangulation::centroidFanTriangulation(vertices);
             break;
             
         case TriangulationMethodGreedyMaxArea:
-            result = Triangulation::greedyMaxAreaTriangulation(vertices);
+            indices = Triangulation::greedyMaxAreaTriangulation(vertices);
             break;
             
         case TriangulationMethodStrip:
-            result = Triangulation::stripTriangulation(vertices);
+            indices = Triangulation::stripTriangulation(vertices);
             break;
             
         case TriangulationMethodMaxMinArea:
-            result = Triangulation::maxMinAreaTriangulation(vertices);
+            indices = Triangulation::maxMinAreaTriangulation(vertices);
             break;
             
         case TriangulationMethodMinMaxArea:
-            result = Triangulation::minMaxAreaTriangulation(vertices);
+            indices = Triangulation::minMaxAreaTriangulation(vertices);
             break;
             
         case TriangulationMethodConstrainedDelaunay:
             return Triangulation::constrainedDelaunay(vertices);
     }
     
-    return result.indices;
+    return indices;
 }
 
 - (void)uploadVertices:(const std::vector<Vertex>&)vertices
