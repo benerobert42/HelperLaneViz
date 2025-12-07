@@ -380,7 +380,7 @@ std::vector<uint32_t> earClippingTriangulation(const std::vector<Vertex>& vertic
     return indices;
 }
 
-std::vector<uint32_t> minimumWeightTriangulation(const std::vector<Vertex>& vertices) {
+std::vector<uint32_t> minimumWeightTriangulation(const std::vector<Vertex>& vertices, bool shouldHandleConcave) {
     std::vector<uint32_t> indices;
     const int vertexCount = static_cast<int>(vertices.size());
     
@@ -416,10 +416,12 @@ std::vector<uint32_t> minimumWeightTriangulation(const std::vector<Vertex>& vert
             
             for (int splitPoint = startIndex + 1; splitPoint < endIndex; ++splitPoint) {
                 // Skip invalid triangles (outside polygon or containing other vertices)
-                if (!isTriangleInsidePolygon(vertices, startIndex, splitPoint, endIndex)) {
-                    continue;
+                if (shouldHandleConcave) {
+                    if (!isTriangleInsidePolygon(vertices, startIndex, splitPoint, endIndex)) {
+                        continue;
+                    }
                 }
-                
+
                 // Cost = left subproblem + right subproblem + new internal edges
                 const double internalEdgeCost = edgeLength(vertices[startIndex], vertices[splitPoint])
                                               + edgeLength(vertices[splitPoint], vertices[endIndex]);
@@ -496,35 +498,16 @@ std::vector<uint32_t> centroidFanTriangulation(std::vector<Vertex>& vertices) {
         const auto& pA = vertices[i].position;
         const auto& pB = vertices[nextIndex].position;
         const auto& pC = vertices[centroidIndex].position;
-        
-        // Check triangle center is inside original polygon
-        simd_float3 center = {(pA.x + pB.x + pC.x) / 3.0f,
-                             (pA.y + pB.y + pC.y) / 3.0f, 1.0f};
-        if (!pointInsidePolygon(center, originalVertices)) {
-            continue; // Triangle center outside = skip
-        }
-        
-        // Check no other boundary vertices inside triangle
-        bool isValid = true;
-        for (size_t v = 0; v < originalVertexCount; ++v) {
-            if (v == i || v == nextIndex) continue;
-            if (pointInTriangle(vertices[v].position, pA, pB, pC)) {
-                isValid = false;
-                break;
-            }
-        }
-        
-        if (isValid) {
-            indices.push_back(i);
-            indices.push_back(nextIndex);
-            indices.push_back(centroidIndex);
-        }
+
+        indices.push_back(i);
+        indices.push_back(nextIndex);
+        indices.push_back(centroidIndex);
     }
     
     return indices;
 }
 
-std::vector<uint32_t> greedyMaxAreaTriangulation(const std::vector<Vertex>& vertices) {
+std::vector<uint32_t> greedyMaxAreaTriangulation(const std::vector<Vertex>& vertices, bool shouldHandleConcave) {
     std::vector<uint32_t> indices;
     const size_t vertexCount = vertices.size();
     
@@ -565,10 +548,12 @@ std::vector<uint32_t> greedyMaxAreaTriangulation(const std::vector<Vertex>& vert
                         uint32_t vk = ccwOrder[polygon[k]];
                         
                         // Skip invalid triangles (outside polygon or containing other vertices)
-                        if (!isTriangleInsidePolygon(vertices, static_cast<int>(vi), static_cast<int>(vj), static_cast<int>(vk))) {
-                            continue;
+                        if (shouldHandleConcave) {
+                            if (!isTriangleInsidePolygon(vertices, static_cast<int>(vi), static_cast<int>(vj), static_cast<int>(vk))) {
+                                continue;
+                            }
                         }
-                        
+
                         const double area = triangleArea(vertices, vi, vj, vk);
                         if (area > largestArea) {
                             largestArea = area;
@@ -688,11 +673,10 @@ std::vector<uint32_t> stripTriangulation(const std::vector<Vertex>& vertices) {
         indices.push_back(indexC);
     }
     
-    // Filter to only keep triangles inside the polygon (important for concave polygons)
-    return filterTrianglesToInterior(vertices, indices);
+    return indices;
 }
 
-std::vector<uint32_t> maxMinAreaTriangulation(const std::vector<Vertex>& vertices) {
+std::vector<uint32_t> maxMinAreaTriangulation(const std::vector<Vertex>& vertices, bool shouldHandleConcave) {
     std::vector<uint32_t> indices;
     const int vertexCount = static_cast<int>(vertices.size());
     
@@ -732,9 +716,10 @@ std::vector<uint32_t> maxMinAreaTriangulation(const std::vector<Vertex>& vertice
                 const uint32_t originalB = ccwOrder[splitPoint];
                 const uint32_t originalC = ccwOrder[endIndex];
                 
-                // Skip invalid triangles
-                if (!isTriangleInsidePolygon(vertices, originalA, originalB, originalC)) continue;
-                
+                if (shouldHandleConcave) {
+                    if (!isTriangleInsidePolygon(vertices, originalA, originalB, originalC)) continue;
+                }
+
                 const double currentTriangleArea = triangleArea(vertices, originalA, originalB, originalC);
                 
                 // Bottleneck = minimum of {left subproblem, right subproblem, this triangle}
@@ -782,7 +767,7 @@ std::vector<uint32_t> maxMinAreaTriangulation(const std::vector<Vertex>& vertice
     return indices;
 }
 
-std::vector<uint32_t> minMaxAreaTriangulation(const std::vector<Vertex>& vertices) {
+std::vector<uint32_t> minMaxAreaTriangulation(const std::vector<Vertex>& vertices, bool shouldHandleConcave) {
     std::vector<uint32_t> indices;
     const int vertexCount = static_cast<int>(vertices.size());
     
@@ -821,9 +806,10 @@ std::vector<uint32_t> minMaxAreaTriangulation(const std::vector<Vertex>& vertice
                 const uint32_t originalB = ccwOrder[splitPoint];
                 const uint32_t originalC = ccwOrder[endIndex];
                 
-                // Skip invalid triangles
-                if (!isTriangleInsidePolygon(vertices, originalA, originalB, originalC)) continue;
-                
+                if (shouldHandleConcave) {
+                    if (!isTriangleInsidePolygon(vertices, originalA, originalB, originalC)) continue;
+                }
+
                 const double currentTriangleArea = triangleArea(vertices, originalA, originalB, originalC);
                 
                 // Cost = maximum of {left subproblem, right subproblem, this triangle}
