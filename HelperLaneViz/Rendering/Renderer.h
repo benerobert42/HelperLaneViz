@@ -45,4 +45,8 @@ typedef NS_ENUM(NSInteger, TriangulationMethod) {
 - (void)computeOverdrawMetricsWithOverdrawSum:(uint64_t* _Nullable)outSum
                                 overdrawRatio:(double* _Nullable)outRatio;
 
+// GPU Frame Timing - measures end-of-pipe to end-of-pipe frame time
+- (void)startFrameTimeMeasurement:(int)frameCount;
+- (BOOL)isFrameTimeMeasurementActive;
+
 @end

@@ -15,6 +15,7 @@
 #import "../Geometry/Triangulation.h"
 #import "../InputHandling/SVGLoader.h"
 #import "Measurements/TriangulationBenchmark.h"
+#import "Measurements/GPUFrameTimer.h"
 
 #import <MetalKit/MetalKit.h>
 #import <mach/mach_time.h>
@@ -87,6 +88,9 @@ static constexpr uint32_t kDefaultTileSize = 32;
     // Helper lane engagement (1x1 dummy texture for forcing derivative computation)
     id<MTLTexture> _helperLaneTexture;
     id<MTLSamplerState> _pointSampler;
+    
+    // GPU frame timing
+    GPUFrameTimer _frameTimer;
 }
 
 @synthesize showGridOverlay = _showGridOverlay;
@@ -645,6 +649,14 @@ static constexpr uint32_t kDefaultTileSize = 32;
 
     [encoder endEncoding];
     [commandBuffer presentDrawable:view.currentDrawable];
+    
+    // Record GPU end time for frame timing measurement (zero overhead)
+    if (_frameTimer.isActive()) {
+        [commandBuffer addCompletedHandler:^(id<MTLCommandBuffer> buffer) {
+            self->_frameTimer.recordGPUEndTime(buffer.GPUEndTime);
+        }];
+    }
+    
     [commandBuffer commit];
 }
 
@@ -862,6 +874,19 @@ static constexpr uint32_t kDefaultTileSize = 32;
                          printMetrics:NO];
     
     _view.paused = NO;
+}
+
+// MARK: - GPU Frame Timing
+
+- (void)startFrameTimeMeasurement:(int)frameCount {
+    printf("⏱️  Starting GPU frame time measurement (%d frames)...\n", frameCount);
+    _frameTimer.startMeasurement(frameCount, [](const GPUFrameTimer::Results& results) {
+        results.print();
+    });
+}
+
+- (BOOL)isFrameTimeMeasurementActive {
+    return _frameTimer.isActive();
 }
 
 @end
