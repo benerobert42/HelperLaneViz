@@ -200,47 +200,6 @@ inline bool isTriangleInsidePolygon(const std::vector<Vertex>& vertices, int i, 
     return true;
 }
 
-// Validate entire triangulation: check for basic validity and crossing edges
-inline bool isTriangulationValid(const std::vector<Vertex>& vertices,
-                                  const std::vector<uint32_t>& indices) {
-    const size_t n = vertices.size();
-    if (n < 3) return false;
-    if (indices.empty() || indices.size() % 3 != 0) return false;
-    
-    // Check all indices are valid
-    for (size_t i = 0; i < indices.size(); ++i) {
-        if (indices[i] >= n) return false;
-    }
-    
-    // For simple polygon validation, check original boundary vertices are covered
-    size_t originalN = n;
-    size_t numTriangles = indices.size() / 3;
-    if (numTriangles > n - 2 && numTriangles == n) {
-        originalN = n - 1; // Likely centroid fan
-    }
-    
-    std::vector<bool> vertexUsed(originalN, false);
-    for (size_t i = 0; i < indices.size(); ++i) {
-        if (indices[i] < originalN) {
-            vertexUsed[indices[i]] = true;
-        }
-    }
-    
-    size_t unusedCount = 0;
-    for (size_t i = 0; i < originalN; ++i) {
-        if (!vertexUsed[i]) unusedCount++;
-    }
-    
-    if (unusedCount > 0) {
-        // Some vertices unused - this is a problem
-        return false;
-    }
-    
-    // Skip expensive edge crossing check for now - CDT handles this properly
-    // The main concern is missing vertices
-    return true;
-}
-
 // Check if an ear (formed by polygon[prev], polygon[curr], polygon[next]) is valid
 // An ear is valid if:
 // 1. It has correct winding (convex at curr vertex for CCW polygon)
@@ -294,28 +253,6 @@ inline std::vector<uint32_t> buildCCWOrder(const std::vector<Vertex>& vertices) 
     return order;
 }
 
-// Filter triangles to only keep those inside the polygon (for concave polygons)
-inline std::vector<uint32_t> filterTrianglesToInterior(
-    const std::vector<Vertex>& vertices,
-    const std::vector<uint32_t>& indices) {
-    
-    std::vector<uint32_t> filtered;
-    filtered.reserve(indices.size());
-    
-    for (size_t i = 0; i < indices.size(); i += 3) {
-        uint32_t a = indices[i];
-        uint32_t b = indices[i + 1];
-        uint32_t c = indices[i + 2];
-        
-        if (isTriangleInsidePolygon(vertices, static_cast<int>(a), static_cast<int>(b), static_cast<int>(c))) {
-            filtered.push_back(a);
-            filtered.push_back(b);
-            filtered.push_back(c);
-        }
-    }
-    
-    return filtered;
-}
 } // anonymous namespace
 
 // MARK: - Edge Length Calculation
@@ -415,10 +352,16 @@ std::vector<uint32_t> minimumWeightTriangulation(const std::vector<Vertex>& vert
             int optimalSplit = -1;
             
             for (int splitPoint = startIndex + 1; splitPoint < endIndex; ++splitPoint) {
-                // Skip invalid triangles (outside polygon or containing other vertices)
-                if (shouldHandleConcave) {
+                // For concave polygons, check if triangle is valid
+                if (shouldHandleConcave) { // likely not needed
                     if (!isTriangleInsidePolygon(vertices, startIndex, splitPoint, endIndex)) {
                         continue;
+                    }
+                } else {
+                    // For convex polygons, still check triangle has positive area (degenerate check)
+                    const double area = triangleArea(vertices, startIndex, splitPoint, endIndex);
+                    if (area <= 0.0) {
+                        continue; // Skip degenerate triangles
                     }
                 }
 
@@ -445,18 +388,46 @@ std::vector<uint32_t> minimumWeightTriangulation(const std::vector<Vertex>& vert
     
     std::function<void(int, int)> emitTriangles = [&](int startIndex, int endIndex) {
         const int splitPoint = split(startIndex, endIndex);
-        if (splitPoint < 0) return;
+        if (splitPoint < 0) {
+            // No split point found - this shouldn't happen for valid triangulation
+            // For closed polygons, if we can't find a split, the edge might be a boundary edge
+            return;
+        }
         
         // Emit triangle (startIndex, splitPoint, endIndex)
         indices.push_back(static_cast<uint32_t>(startIndex));
         indices.push_back(static_cast<uint32_t>(splitPoint));
         indices.push_back(static_cast<uint32_t>(endIndex));
         
-        emitTriangles(startIndex, splitPoint);
-        emitTriangles(splitPoint, endIndex);
+        // Recurse on sub-chains
+        if (splitPoint > startIndex + 1) {
+            emitTriangles(startIndex, splitPoint);
+        }
+        if (endIndex > splitPoint + 1) {
+            emitTriangles(splitPoint, endIndex);
+        }
     };
     
+    // For closed polygons, we need to triangulate the full chain [0, vertexCount-1]
+    // The algorithm already handles this, but we need to ensure it completes
     emitTriangles(0, vertexCount - 1);
+    
+    // Verify we got the expected number of triangles (n-2 for n vertices)
+    // If we got fewer, the DP table might not have been filled correctly
+    const size_t expectedTriangles = vertexCount - 2;
+    if (indices.size() / 3 < expectedTriangles) {
+        // Fallback: the DP might have failed, try a simpler approach for convex polygons
+        if (!shouldHandleConcave) {
+            // For convex polygons, use fan triangulation from vertex 0
+            indices.clear();
+            indices.reserve(3 * expectedTriangles);
+            for (int i = 1; i < vertexCount - 1; ++i) {
+                indices.push_back(0);
+                indices.push_back(static_cast<uint32_t>(i));
+                indices.push_back(static_cast<uint32_t>(i + 1));
+            }
+        }
+    }
     
     return indices;
 }
@@ -488,16 +459,6 @@ std::vector<uint32_t> centroidFanTriangulation(std::vector<Vertex>& vertices) {
 
     for (uint32_t i = 0; i < originalVertexCount; ++i) {
         const uint32_t nextIndex = (i + 1) % static_cast<uint32_t>(originalVertexCount);
-        
-        // For concave polygons, check if triangle is inside polygon before adding
-        // Check against original polygon (first originalVertexCount vertices)
-        std::vector<Vertex> originalVertices(vertices.begin(), vertices.begin() + static_cast<ptrdiff_t>(originalVertexCount));
-        
-        // Create temporary triangle with centroid for validation
-        // Note: centroid is not in originalVertices, so we check manually
-        const auto& pA = vertices[i].position;
-        const auto& pB = vertices[nextIndex].position;
-        const auto& pC = vertices[centroidIndex].position;
 
         indices.push_back(i);
         indices.push_back(nextIndex);
@@ -515,7 +476,14 @@ std::vector<uint32_t> greedyMaxAreaTriangulation(const std::vector<Vertex>& vert
         return indices;
     }
 
-    const std::vector<uint32_t> ccwOrder = buildCCWOrder(vertices);
+    // For convex polygons (shouldHandleConcave=false), skip CCW order rebuild
+    std::vector<uint32_t> ccwOrder;
+    if (shouldHandleConcave) {
+        ccwOrder = buildCCWOrder(vertices);
+    } else {
+        ccwOrder.resize(vertexCount);
+        std::iota(ccwOrder.begin(), ccwOrder.end(), 0);
+    }
 
     // Recursive solver: triangulates a sub-polygon by selecting the largest triangle
     // polygon is indices into ccwOrder array (which gives actual vertex indices)
@@ -547,14 +515,19 @@ std::vector<uint32_t> greedyMaxAreaTriangulation(const std::vector<Vertex>& vert
                         uint32_t vj = ccwOrder[polygon[j]];
                         uint32_t vk = ccwOrder[polygon[k]];
                         
-                        // Skip invalid triangles (outside polygon or containing other vertices)
+                        // Calculate area first (needed for both validation and selection)
+                        const double area = triangleArea(vertices, vi, vj, vk);
+                        
+                        // For convex polygons (shouldHandleConcave=false), check triangle has positive area
+                        // For concave polygons, we need full validity check
                         if (shouldHandleConcave) {
                             if (!isTriangleInsidePolygon(vertices, static_cast<int>(vi), static_cast<int>(vj), static_cast<int>(vk))) {
                                 continue;
                             }
+                        } else {
+                            // For convex polygons, still ensure triangle has positive area (degenerate check)
+                            if (area <= 0.0) continue;
                         }
-
-                        const double area = triangleArea(vertices, vi, vj, vk);
                         if (area > largestArea) {
                             largestArea = area;
                             bestI = i;
@@ -565,7 +538,17 @@ std::vector<uint32_t> greedyMaxAreaTriangulation(const std::vector<Vertex>& vert
                 }
             }
             
-            if (largestArea < 0) return; // No valid triangle found
+            if (largestArea < 0) {
+                // No valid triangle found - this shouldn't happen for valid polygons
+                // Fallback: use first three vertices
+                if (polygonSize >= 3) {
+                    uint32_t va = ccwOrder[polygon[0]];
+                    uint32_t vb = ccwOrder[polygon[1]];
+                    uint32_t vc = ccwOrder[polygon[2]];
+                    indices.insert(indices.end(), {va, vb, vc});
+                }
+                return;
+            }
             
             // Emit the selected triangle
             const uint32_t vertexA = ccwOrder[polygon[bestI]];
@@ -637,21 +620,32 @@ std::vector<uint32_t> stripTriangulation(const std::vector<Vertex>& vertices) {
         return indices;
     }
     
-    // Ensure CCW order for proper boundary traversal
-    const std::vector<uint32_t> ccwOrder = buildCCWOrder(vertices);
-    const bool isClockwise = polygonSignedArea(vertices) < 0.0;
+    // For convex polygons, skip expensive CCW order rebuild
+    // Check if polygon is likely convex (simple heuristic: CCW area check)
+    const bool likelyConvex = polygonSignedArea(vertices) >= 0.0;
     
-    // Build strip order: alternating from start and end of CCW-ordered polygon
+    // Build strip order: alternating from start and end
     std::vector<uint32_t> stripOrder;
     stripOrder.reserve(vertexCount);
     
     size_t leftIdx = 0;
     size_t rightIdx = vertexCount - 1;
     
-    while (leftIdx <= rightIdx) {
-        stripOrder.push_back(ccwOrder[leftIdx++]);
-        if (leftIdx > rightIdx) break;
-        stripOrder.push_back(ccwOrder[rightIdx--]);
+    if (likelyConvex) {
+        // For convex: use direct indices (assume already in order)
+        while (leftIdx <= rightIdx) {
+            stripOrder.push_back(static_cast<uint32_t>(leftIdx++));
+            if (leftIdx > rightIdx) break;
+            stripOrder.push_back(static_cast<uint32_t>(rightIdx--));
+        }
+    } else {
+        // For concave: ensure CCW order first
+        const std::vector<uint32_t> ccwOrder = buildCCWOrder(vertices);
+        while (leftIdx <= rightIdx) {
+            stripOrder.push_back(ccwOrder[leftIdx++]);
+            if (leftIdx > rightIdx) break;
+            stripOrder.push_back(ccwOrder[rightIdx--]);
+        }
     }
     
     // Generate triangles from consecutive strip triplets
@@ -662,10 +656,13 @@ std::vector<uint32_t> stripTriangulation(const std::vector<Vertex>& vertices) {
         uint32_t indexB = stripOrder[i + 1];
         uint32_t indexC = stripOrder[i + 2];
         
-        // Alternate winding to maintain consistent orientation
-        const bool shouldSwap = isClockwise ? ((i % 2) == 0) : ((i % 2) == 1);
-        if (shouldSwap) {
-            std::swap(indexA, indexB);
+        // Alternate winding to maintain consistent orientation (only needed for concave)
+        if (!likelyConvex) {
+            const bool isClockwise = polygonSignedArea(vertices) < 0.0;
+            const bool shouldSwap = isClockwise ? ((i % 2) == 0) : ((i % 2) == 1);
+            if (shouldSwap) {
+                std::swap(indexA, indexB);
+            }
         }
         
         indices.push_back(indexA);
@@ -684,7 +681,14 @@ std::vector<uint32_t> maxMinAreaTriangulation(const std::vector<Vertex>& vertice
         return indices;
     }
     
-    const std::vector<uint32_t> ccwOrder = buildCCWOrder(vertices);
+    // For convex polygons (shouldHandleConcave=false), skip CCW order rebuild
+    std::vector<uint32_t> ccwOrder;
+    if (shouldHandleConcave) {
+        ccwOrder = buildCCWOrder(vertices);
+    } else {
+        ccwOrder.resize(vertexCount);
+        std::iota(ccwOrder.begin(), ccwOrder.end(), 0);
+    }
     
     // DP tables: dp[i][j] = maximum achievable minimum triangle area for chain [i, j]
     std::vector<double> dpTable(vertexCount * vertexCount, 0.0);
@@ -775,7 +779,14 @@ std::vector<uint32_t> minMaxAreaTriangulation(const std::vector<Vertex>& vertice
         return indices;
     }
     
-    const std::vector<uint32_t> ccwOrder = buildCCWOrder(vertices);
+    // For convex polygons (shouldHandleConcave=false), skip CCW order rebuild
+    std::vector<uint32_t> ccwOrder;
+    if (shouldHandleConcave) {
+        ccwOrder = buildCCWOrder(vertices);
+    } else {
+        ccwOrder.resize(vertexCount);
+        std::iota(ccwOrder.begin(), ccwOrder.end(), 0);
+    }
     
     // DP tables: dp[i][j] = minimum achievable maximum triangle area for chain [i, j]
     std::vector<double> dpTable(vertexCount * vertexCount, 0.0);

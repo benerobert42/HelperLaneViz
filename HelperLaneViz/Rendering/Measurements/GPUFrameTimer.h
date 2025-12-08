@@ -47,21 +47,19 @@ public:
         _targetFrames = frameCount;
         _frameTimes.clear();
         _frameTimes.reserve(frameCount);
-        _lastGPUEndTime = -1.0;
         _isActive = true;
         _callback = callback;
     }
     
-    /// Record a GPU end time (call from command buffer completion handler)
+    /// Record GPU execution time (call from command buffer completion handler)
     /// Returns true if measurement session is complete
-    bool recordGPUEndTime(double gpuEndTime) {
+    bool recordGPUEndTime(double gpuStartTime, double gpuEndTime) {
         if (!_isActive) return false;
         
-        if (_lastGPUEndTime > 0.0 && gpuEndTime > _lastGPUEndTime) {
-            double frameTimeMs = (gpuEndTime - _lastGPUEndTime) * 1000.0;
+        if (gpuStartTime > 0.0 && gpuEndTime > gpuStartTime) {
+            double frameTimeMs = (gpuEndTime - gpuStartTime) * 1000.0;
             _frameTimes.push_back(frameTimeMs);
         }
-        _lastGPUEndTime = gpuEndTime;
         
         if ((int)_frameTimes.size() >= _targetFrames) {
             _isActive = false;
@@ -123,7 +121,6 @@ private:
     
     bool _isActive = false;
     int _targetFrames = 0;
-    double _lastGPUEndTime = -1.0;
     std::vector<double> _frameTimes;
     CompletionCallback _callback;
 };

@@ -119,17 +119,17 @@ static constexpr uint32_t kDefaultTileSize = 32;
     [self setupTileHeatmapPipelines];
     
 //  Configure geometry: ellipse with 300 vertices, MWT triangulation, 3x3 grid
-    [self setupEllipseWithVertexCount:50
-                        semiMajorAxis:1.0f
-                        semiMinorAxis:0.2f
-                  triangulationMethod:TriangulationMethodConstrainedDelaunay
-                     instanceGridCols:10
-                             gridRows:50
-                         printMetrics:YES];
-//    [self loadSVGFromPath:@"/Users/robi/Downloads/Tractor2.svg"
-//      triangulationMethod:TriangulationMethodGreedyMaxArea
-//         instanceGridCols:1
-//                 gridRows:1];
+//    [self setupEllipseWithVertexCount:1000
+//                        semiMajorAxis:1.0f
+//                        semiMinorAxis:1.0f
+//                  triangulationMethod:TriangulationMethodMinimumWeight
+//                     instanceGridCols:100
+//                             gridRows:100
+//                         printMetrics:YES];
+    [self loadSVGFromPath:@"/Users/robi/Downloads/1295383.svg"
+      triangulationMethod:TriangulationMethodMinimumWeight
+         instanceGridCols:40
+                 gridRows:40];
 
     uint64_t overdrawSum;
     double overdrawRatio;
@@ -218,6 +218,10 @@ static constexpr uint32_t kDefaultTileSize = 32;
     
     _currentVertices = GeometryFactory::CreateVerticesForEllipse(vertexCount, a, b);
     _currentIndices = [self triangulateVertices:_currentVertices withMethod:method];
+    
+    // Verify vertex count (debug)
+    NSLog(@"Ellipse: requested %d vertices, created %zu vertices, %zu triangles", 
+          vertexCount, _currentVertices.size(), _currentIndices.size() / 3);
     
     [self uploadVertices:_currentVertices indices:_currentIndices];
     
@@ -365,8 +369,8 @@ static constexpr uint32_t kDefaultTileSize = 32;
     const float geomAspect = (geomHeight > 0.0001f) ? (geomWidth / geomHeight) : 1.0f;
     
     // Add padding around edges and between instances
-    const float edgePadding = 0.02f;
-    const float instancePadding = 0.01f;
+    const float edgePadding = 0.00f;
+    const float instancePadding = 0.00f;
 
     // Available space after edge padding
     const float availableWidth = 2.0f - 2.0f * edgePadding;
@@ -650,10 +654,10 @@ static constexpr uint32_t kDefaultTileSize = 32;
     [encoder endEncoding];
     [commandBuffer presentDrawable:view.currentDrawable];
     
-    // Record GPU end time for frame timing measurement (zero overhead)
+    // Record GPU execution time for frame timing measurement (zero overhead)
     if (_frameTimer.isActive()) {
         [commandBuffer addCompletedHandler:^(id<MTLCommandBuffer> buffer) {
-            self->_frameTimer.recordGPUEndTime(buffer.GPUEndTime);
+            self->_frameTimer.recordGPUEndTime(buffer.GPUStartTime, buffer.GPUEndTime);
         }];
     }
     
@@ -664,7 +668,7 @@ static constexpr uint32_t kDefaultTileSize = 32;
     [encoder setRenderPipelineState:_mainPipeline];
     [encoder setDepthStencilState:_depthState];
     [encoder setCullMode:MTLCullModeNone];
-    [encoder setTriangleFillMode:MTLTriangleFillModeFill];
+    [encoder setTriangleFillMode:MTLTriangleFillModeLines];
 
     FrameConstants frameConstants = {
         .viewProjectionMatrix = _viewProjectionMatrix,
@@ -868,7 +872,7 @@ static constexpr uint32_t kDefaultTileSize = 32;
     [self setupEllipseWithVertexCount:300
                         semiMajorAxis:1.0f
                         semiMinorAxis:0.5f
-                  triangulationMethod:TriangulationMethodMinimumWeight
+                  triangulationMethod:TriangulationMethodCentroidFan
                      instanceGridCols:3
                              gridRows:3
                          printMetrics:NO];

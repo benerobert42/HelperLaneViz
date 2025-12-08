@@ -52,7 +52,7 @@
     if ([_renderer isFrameTimeMeasurementActive]) {
         return; // Measurement already in progress
     }
-    [_renderer startFrameTimeMeasurement:100];
+    [_renderer startFrameTimeMeasurement:400];
 }
 
 @end
