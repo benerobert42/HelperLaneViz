@@ -11,6 +11,7 @@
 #import "GridOverlay.h"
 #import "PipelineFactory.h"
 #import "TriangulationMetrics.h"
+#import "ImGUIHelper.h"
 #import "../Geometry/GeometryFactory.h"
 #import "../Geometry/Triangulation.h"
 #import "../InputHandling/SVGLoader.h"
@@ -91,6 +92,9 @@ static constexpr uint32_t kDefaultTileSize = 32;
     
     // GPU frame timing
     GPUFrameTimer _frameTimer;
+    
+    // ImGUI
+    ImGUIHelper *_imguiHelper;
 }
 
 @synthesize showGridOverlay = _showGridOverlay;
@@ -118,6 +122,9 @@ static constexpr uint32_t kDefaultTileSize = 32;
     [self setupGridOverlay];
     [self setupTileHeatmapPipelines];
     
+    // Initialize ImGUI
+    _imguiHelper = [[ImGUIHelper alloc] initWithDevice:_device view:mtkView];
+    
 //  Configure geometry: ellipse with 300 vertices, MWT triangulation, 3x3 grid
 //    [self setupEllipseWithVertexCount:1000
 //                        semiMajorAxis:1.0f
@@ -126,10 +133,10 @@ static constexpr uint32_t kDefaultTileSize = 32;
 //                     instanceGridCols:100
 //                             gridRows:100
 //                         printMetrics:YES];
-    [self loadSVGFromPath:@"/Users/robi/Downloads/1295383.svg"
+    [self loadSVGFromPath:@"/Users/robi/Downloads/2052062.svg"
       triangulationMethod:TriangulationMethodMinimumWeight
-         instanceGridCols:40
-                 gridRows:40];
+         instanceGridCols:5
+                 gridRows:5];
 
     uint64_t overdrawSum;
     double overdrawRatio;
@@ -264,7 +271,7 @@ static constexpr uint32_t kDefaultTileSize = 32;
     // Tessellate and triangulate each path with the chosen method
     std::vector<Vertex> vertices;
     std::vector<uint32_t> indices;
-    if (!SVGLoader::TessellateSvgToMesh(path.UTF8String, vertices, indices, triangulator, 20.0f)) {
+    if (!SVGLoader::TessellateSvgToMesh(path.UTF8String, vertices, indices, triangulator, 1.0f)) {
         NSLog(@"Failed to load SVG: %@", path);
         return NO;
     }
@@ -297,7 +304,7 @@ static constexpr uint32_t kDefaultTileSize = 32;
             break;
             
         case TriangulationMethodMinimumWeight:
-            indices = Triangulation::minimumWeightTriangulation(vertices);
+            indices = Triangulation::minimumWeightTriangulation(vertices, true);
             break;
             
         case TriangulationMethodCentroidFan:
@@ -634,6 +641,12 @@ static constexpr uint32_t kDefaultTileSize = 32;
         return;
     }
     
+    // Start ImGUI frame
+    [_imguiHelper newFrameWithRenderPassDescriptor:renderPassDescriptor];
+    
+    // Show example ImGUI window (you can replace this with your own UI code)
+    [_imguiHelper showExampleWindow];
+    
     renderPassDescriptor.tileWidth = _tileSizePixels;
     renderPassDescriptor.tileHeight = _tileSizePixels;
     
@@ -650,6 +663,9 @@ static constexpr uint32_t kDefaultTileSize = 32;
     if (_showGridOverlay && !_showOverdraw) {
         [self encodeGridOverlayWithEncoder:encoder drawableSize:view.drawableSize];
     }
+    
+    // Render ImGUI (on top of everything)
+    [_imguiHelper renderWithCommandBuffer:commandBuffer commandEncoder:encoder];
 
     [encoder endEncoding];
     [commandBuffer presentDrawable:view.currentDrawable];

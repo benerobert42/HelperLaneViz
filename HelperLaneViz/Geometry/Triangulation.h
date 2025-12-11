@@ -19,6 +19,9 @@ namespace Triangulation {
 double calculateTotalEdgeLength(const std::vector<Vertex>& vertices,
                                 const std::vector<uint32_t>& indices);
 
+std::vector<Vertex> buildPolygonWithHoles(const std::vector<Vertex>& outer,
+                                          const std::vector<std::vector<Vertex>>& holes);
+
 // MARK: - Polygon Triangulation Methods
 
 // Simple ear clipping triangulation - O(n²), works for any simple polygon.

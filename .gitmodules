@@ -4,3 +4,6 @@
 [submodule "external/eigen/external/eigen"]
 	path = external/eigen/external/eigen
 	url = https://gitlab.com/libeigen/eigen.git
+[submodule "external/imgui"]
+	path = external/imgui
+	url = https://github.com/ocornut/imgui.git
