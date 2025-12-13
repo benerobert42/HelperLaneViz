@@ -25,8 +25,9 @@ struct ShapeWithHoles {
     std::vector<std::vector<Vertex>> holes;     // CW hole boundaries
 };
 
-// Triangulator: takes polygon vertices (no holes), returns triangle indices
-using Triangulator = std::function<std::vector<uint32_t>(std::vector<Vertex>&)>;
+// Triangulator: takes polygon vertices, returns triangle indices
+// Parameters: vertices (bridged polygon), shouldHandleConcave, handleHoles, outerVertices, holes
+using Triangulator = std::function<std::vector<uint32_t>(const std::vector<Vertex>&, bool, bool, const std::vector<Vertex>&, const std::vector<std::vector<Vertex>>&)>;
 
 // Triangulator with holes: takes outer boundary + holes, returns indices
 using TriangulatorWithHoles = std::function<std::vector<uint32_t>(

@@ -136,14 +136,15 @@ std::vector<SVGLoader::ShapeWithHoles> SVGLoader::ParseSvgToShapes(
             }
             
             if (!isClosed) continue;
-            
-            // Ensure CCW orientation
-            if (GetSignedArea(poly) < 0) {
-                std::reverse(poly.begin(), poly.end());
-            }
-            
+
             ShapeWithHoles shapeWithHoles;
-            shapeWithHoles.outerBoundary = PolyToVertices(poly);
+
+            if (GetSignedArea(poly) > 0) {
+                shapeWithHoles.holes.push_back(PolyToVertices(poly));
+            } else {
+                shapeWithHoles.outerBoundary = PolyToVertices(poly);
+            }
+
             result.push_back(std::move(shapeWithHoles));
         }
     }
@@ -169,32 +170,32 @@ bool SVGLoader::TessellateSvgToMesh(const std::string& filePath,
         fprintf(stderr, "SVGLoader: No shapes found\n");
         return false;
     }
-    
-    uint32_t baseVertex = 0;
-    
+
+    std::vector<Vertex> allVertices;
+    std::vector<Vertex> outerVertices;
+    std::vector<std::vector<Vertex>> holeVertices;
+
     for (auto& shape : shapes) {
         if (shape.outerBoundary.size() < 3) continue;
         
         // Use the provided triangulator directly
-        std::vector<Vertex> verts = shape.outerBoundary;
-        std::vector<uint32_t> indices = triangulator(verts);
-        
-        if (indices.empty()) {
-            fprintf(stderr, "SVGLoader: Triangulation failed for shape with %zu verts\n", 
-                    shape.outerBoundary.size());
-            continue;
-        }
-        
-        // Append to output
-        for (const auto& v : verts) {
-            outPositions.push_back(v);
-        }
-        for (uint32_t idx : indices) {
-            outIndices.push_back(baseVertex + idx);
-        }
-        baseVertex += static_cast<uint32_t>(verts.size());
+        allVertices.insert(allVertices.end(), shape.outerBoundary.begin(), shape.outerBoundary.end());
+        holeVertices.insert(holeVertices.end(), shape.holes.begin(), shape.holes.end());
+        outerVertices.insert(outerVertices.end(), shape.outerBoundary.begin(), shape.outerBoundary.end());
     }
-    
+
+    std::vector<uint32_t> indices = triangulator(allVertices,true, true, outerVertices, holeVertices);
+    if (indices.empty()) {
+        fprintf(stderr, "SVGLoader: Triangulation failed");
+    }
+
+    for (const auto& v : allVertices) {
+        outPositions.push_back(v);
+    }
+    for (uint32_t idx : indices) {
+        outIndices.push_back(idx);
+    }
+
     fprintf(stderr, "SVGLoader: Output: %zu vertices, %zu triangles\n", 
             outPositions.size(), outIndices.size() / 3);
     
@@ -218,7 +219,7 @@ bool SVGLoader::TessellateSvgToMesh(const std::string& filePath,
                                     float bezierMaxDeviationPx)
 {
     // Default: use CDT
-    auto defaultTriangulator = [](std::vector<Vertex>& verts) {
+    auto defaultTriangulator = [](const std::vector<Vertex>& verts, bool, bool, const std::vector<Vertex>&, const std::vector<std::vector<Vertex>>&) {
         return Triangulation::constrainedDelaunay(verts);
     };
     return TessellateSvgToMesh(filePath, outPositions, outIndices, 

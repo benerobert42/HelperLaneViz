@@ -200,6 +200,48 @@ inline bool isTriangleInsidePolygon(const std::vector<Vertex>& vertices, int i, 
     return true;
 }
 
+// Check if triangle is valid when handling holes: inside outer polygon and not in any hole
+inline bool isTriangleValidWithHoles(const std::vector<Vertex>& vertices, int i, int j, int k,
+                                     const std::vector<Vertex>& outerVertices,
+                                     const std::vector<std::vector<Vertex>>& holes) {
+    if (!isTriangleInsidePolygon(vertices, i, j, k)) {
+        return false;
+    }
+    
+    if (holes.empty()) {
+        return true;
+    }
+    
+    const auto& pA = vertices[i].position;
+    const auto& pB = vertices[j].position;
+    const auto& pC = vertices[k].position;
+    
+    // Check triangle doesn't intersect or contain any hole
+    for (const auto& hole : holes) {
+        const size_t holeSize = hole.size();
+        
+        // Check if any triangle vertex is inside the hole
+        if (pointInsidePolygon(pA, hole) || pointInsidePolygon(pB, hole) || pointInsidePolygon(pC, hole)) {
+            return false;
+        }
+        
+        // Check if any triangle edge intersects any hole edge
+        for (size_t h = 0; h < holeSize; ++h) {
+            const auto& h1 = hole[h].position;
+            const auto& h2 = hole[(h + 1) % holeSize].position;
+            
+            // Check triangle edges against hole edges
+            if (segmentsIntersect(pA, pB, h1, h2) ||
+                segmentsIntersect(pB, pC, h1, h2) ||
+                segmentsIntersect(pC, pA, h1, h2)) {
+                return false; // Triangle edge intersects hole edge
+            }
+        }
+    }
+    
+    return true;
+}
+
 // Check if an ear (formed by polygon[prev], polygon[curr], polygon[next]) is valid
 // An ear is valid if:
 // 1. It has correct winding (convex at curr vertex for CCW polygon)
@@ -482,7 +524,11 @@ std::vector<uint32_t> earClippingTriangulation(const std::vector<Vertex>& vertic
     return indices;
 }
 
-std::vector<uint32_t> minimumWeightTriangulation(const std::vector<Vertex>& vertices, bool shouldHandleConcave) {
+std::vector<uint32_t> minimumWeightTriangulation(const std::vector<Vertex>& vertices,
+                                                 bool shouldHandleConcave,
+                                                 bool handleHoles,
+                                                 const std::vector<Vertex>& outerVertices,
+                                                 const std::vector<std::vector<Vertex>>& holes) {
     std::vector<uint32_t> indices;
     const int vertexCount = static_cast<int>(vertices.size());
     
@@ -519,7 +565,10 @@ std::vector<uint32_t> minimumWeightTriangulation(const std::vector<Vertex>& vert
             for (int splitPoint = startIndex + 1; splitPoint < endIndex; ++splitPoint) {
                 // For concave polygons, check if triangle is valid
                 if (shouldHandleConcave) { // likely not needed
-                    if (!isTriangleInsidePolygon(vertices, startIndex, splitPoint, endIndex)) {
+                    bool isValid = handleHoles 
+                        ? isTriangleValidWithHoles(vertices, startIndex, splitPoint, endIndex, outerVertices, holes)
+                        : isTriangleInsidePolygon(vertices, startIndex, splitPoint, endIndex);
+                    if (!isValid) {
                         continue;
                     }
                 } else {
@@ -633,7 +682,7 @@ std::vector<uint32_t> centroidFanTriangulation(std::vector<Vertex>& vertices) {
     return indices;
 }
 
-std::vector<uint32_t> greedyMaxAreaTriangulation(const std::vector<Vertex>& vertices, bool shouldHandleConcave) {
+std::vector<uint32_t> greedyMaxAreaTriangulation(const std::vector<Vertex>& vertices, bool shouldHandleConcave, bool handleHoles, const std::vector<Vertex>& outerVertices, const std::vector<std::vector<Vertex>>& holes) {
     std::vector<uint32_t> indices;
     const size_t vertexCount = vertices.size();
     
@@ -686,7 +735,10 @@ std::vector<uint32_t> greedyMaxAreaTriangulation(const std::vector<Vertex>& vert
                         // For convex polygons (shouldHandleConcave=false), check triangle has positive area
                         // For concave polygons, we need full validity check
                         if (shouldHandleConcave) {
-                            if (!isTriangleInsidePolygon(vertices, static_cast<int>(vi), static_cast<int>(vj), static_cast<int>(vk))) {
+                            bool isValid = handleHoles
+                                ? isTriangleValidWithHoles(vertices, static_cast<int>(vi), static_cast<int>(vj), static_cast<int>(vk), outerVertices, holes)
+                                : isTriangleInsidePolygon(vertices, static_cast<int>(vi), static_cast<int>(vj), static_cast<int>(vk));
+                            if (!isValid) {
                                 continue;
                             }
                         } else {
@@ -838,7 +890,7 @@ std::vector<uint32_t> stripTriangulation(const std::vector<Vertex>& vertices) {
     return indices;
 }
 
-std::vector<uint32_t> maxMinAreaTriangulation(const std::vector<Vertex>& vertices, bool shouldHandleConcave) {
+std::vector<uint32_t> maxMinAreaTriangulation(const std::vector<Vertex>& vertices, bool shouldHandleConcave, bool handleHoles, const std::vector<Vertex>& outerVertices, const std::vector<std::vector<Vertex>>& holes) {
     std::vector<uint32_t> indices;
     const int vertexCount = static_cast<int>(vertices.size());
     
@@ -886,7 +938,10 @@ std::vector<uint32_t> maxMinAreaTriangulation(const std::vector<Vertex>& vertice
                 const uint32_t originalC = ccwOrder[endIndex];
                 
                 if (shouldHandleConcave) {
-                    if (!isTriangleInsidePolygon(vertices, originalA, originalB, originalC)) continue;
+                    bool isValid = handleHoles
+                        ? isTriangleValidWithHoles(vertices, originalA, originalB, originalC, outerVertices, holes)
+                        : isTriangleInsidePolygon(vertices, originalA, originalB, originalC);
+                    if (!isValid) continue;
                 }
 
                 const double currentTriangleArea = triangleArea(vertices, originalA, originalB, originalC);
@@ -936,7 +991,7 @@ std::vector<uint32_t> maxMinAreaTriangulation(const std::vector<Vertex>& vertice
     return indices;
 }
 
-std::vector<uint32_t> minMaxAreaTriangulation(const std::vector<Vertex>& vertices, bool shouldHandleConcave) {
+std::vector<uint32_t> minMaxAreaTriangulation(const std::vector<Vertex>& vertices, bool shouldHandleConcave, bool handleHoles, const std::vector<Vertex>& outerVertices, const std::vector<std::vector<Vertex>>& holes) {
     std::vector<uint32_t> indices;
     const int vertexCount = static_cast<int>(vertices.size());
     
@@ -983,7 +1038,10 @@ std::vector<uint32_t> minMaxAreaTriangulation(const std::vector<Vertex>& vertice
                 const uint32_t originalC = ccwOrder[endIndex];
                 
                 if (shouldHandleConcave) {
-                    if (!isTriangleInsidePolygon(vertices, originalA, originalB, originalC)) continue;
+                    bool isValid = handleHoles
+                        ? isTriangleValidWithHoles(vertices, originalA, originalB, originalC, outerVertices, holes)
+                        : isTriangleInsidePolygon(vertices, originalA, originalB, originalC);
+                    if (!isValid) continue;
                 }
 
                 const double currentTriangleArea = triangleArea(vertices, originalA, originalB, originalC);

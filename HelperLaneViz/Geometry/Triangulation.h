@@ -28,23 +28,23 @@ std::vector<Vertex> buildPolygonWithHoles(const std::vector<Vertex>& outer,
 std::vector<uint32_t> earClippingTriangulation(const std::vector<Vertex>& vertices);
 
 // Minimum Weight Triangulation using dynamic programming.
-std::vector<uint32_t> minimumWeightTriangulation(const std::vector<Vertex>& vertices, bool shouldHandleConcave = false);
+std::vector<uint32_t> minimumWeightTriangulation(const std::vector<Vertex>& vertices, bool shouldHandleConcave = false, bool handleHoles = false, const std::vector<Vertex>& outerVertices = {}, const std::vector<std::vector<Vertex>>& holes = {});
 
 // Fan triangulation from the centroid.
 // Note: Modifies vertices by appending the centroid vertex.
 std::vector<uint32_t> centroidFanTriangulation(std::vector<Vertex>& vertices);
 
 // Greedy triangulation selecting largest area triangles first (ear-clipping based).
-std::vector<uint32_t> greedyMaxAreaTriangulation(const std::vector<Vertex>& vertices, bool shouldHandleConcave = false);
+std::vector<uint32_t> greedyMaxAreaTriangulation(const std::vector<Vertex>& vertices, bool shouldHandleConcave = false, bool handleHoles = false, const std::vector<Vertex>& outerVertices = {}, const std::vector<std::vector<Vertex>>& holes = {});
 
 // Strip triangulation alternating from both ends.
 std::vector<uint32_t> stripTriangulation(const std::vector<Vertex>& vertices);
 
 // Maximizes the minimum triangle area (max-min optimization).
-std::vector<uint32_t> maxMinAreaTriangulation(const std::vector<Vertex>& vertices, bool shouldHandleConcave = false);
+std::vector<uint32_t> maxMinAreaTriangulation(const std::vector<Vertex>& vertices, bool shouldHandleConcave = false, bool handleHoles = false, const std::vector<Vertex>& outerVertices = {}, const std::vector<std::vector<Vertex>>& holes = {});
 
 // Minimizes the maximum triangle area (min-max optimization).
-std::vector<uint32_t> minMaxAreaTriangulation(const std::vector<Vertex>& vertices, bool shouldHandleConcave = false);
+std::vector<uint32_t> minMaxAreaTriangulation(const std::vector<Vertex>& vertices, bool shouldHandleConcave = false, bool handleHoles = false, const std::vector<Vertex>& outerVertices = {}, const std::vector<std::vector<Vertex>>& holes = {});
 
 // Constrained Delaunay Triangulation - handles any simple polygon including concave.
 // Uses libigl's Triangle library wrapper.

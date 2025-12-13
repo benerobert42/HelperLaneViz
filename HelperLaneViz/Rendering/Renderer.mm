@@ -264,8 +264,45 @@ static constexpr uint32_t kDefaultTileSize = 32;
                gridRows:(uint32_t)rows {
     
     // Create triangulator that uses the selected method
-    SVGLoader::Triangulator triangulator = [self, method](std::vector<Vertex>& verts) -> std::vector<uint32_t> {
-        return [self triangulateVertices:verts withMethod:method];
+    SVGLoader::Triangulator triangulator = [self, method](const std::vector<Vertex>& verts, bool shouldHandleConcave, bool handleHoles, const std::vector<Vertex>& outerVertices, const std::vector<std::vector<Vertex>>& holes) -> std::vector<uint32_t> {
+        std::vector<Vertex> mutableVerts = verts;
+        std::vector<uint32_t> indices;
+        
+        switch (method) {
+            case TriangulationMethodEarClipping:
+                indices = Triangulation::earClippingTriangulation(mutableVerts);
+                break;
+                
+            case TriangulationMethodMinimumWeight:
+                indices = Triangulation::minimumWeightTriangulation(mutableVerts, shouldHandleConcave, handleHoles, outerVertices, holes);
+                break;
+                
+            case TriangulationMethodCentroidFan:
+                indices = Triangulation::centroidFanTriangulation(mutableVerts);
+                break;
+                
+            case TriangulationMethodGreedyMaxArea:
+                indices = Triangulation::greedyMaxAreaTriangulation(mutableVerts, shouldHandleConcave, handleHoles, outerVertices, holes);
+                break;
+                
+            case TriangulationMethodStrip:
+                indices = Triangulation::stripTriangulation(mutableVerts);
+                break;
+                
+            case TriangulationMethodMaxMinArea:
+                indices = Triangulation::maxMinAreaTriangulation(mutableVerts, shouldHandleConcave, handleHoles, outerVertices, holes);
+                break;
+                
+            case TriangulationMethodMinMaxArea:
+                indices = Triangulation::minMaxAreaTriangulation(mutableVerts, shouldHandleConcave, handleHoles, outerVertices, holes);
+                break;
+                
+            case TriangulationMethodConstrainedDelaunay:
+                indices = Triangulation::constrainedDelaunay(mutableVerts);
+                break;
+        }
+        
+        return indices;
     };
     
     // Tessellate and triangulate each path with the chosen method
