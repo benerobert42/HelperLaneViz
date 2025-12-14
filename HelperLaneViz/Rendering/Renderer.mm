@@ -270,35 +270,35 @@ static constexpr uint32_t kDefaultTileSize = 32;
         
         switch (method) {
             case TriangulationMethodEarClipping:
-                indices = Triangulation::earClippingTriangulation(mutableVerts);
+                indices = Triangulation::EarClippingTriangulation(mutableVerts);
                 break;
                 
             case TriangulationMethodMinimumWeight:
-                indices = Triangulation::minimumWeightTriangulation(mutableVerts, shouldHandleConcave, handleHoles, outerVertices, holes);
+                indices = Triangulation::MinimumWeightTriangulation(mutableVerts, shouldHandleConcave, handleHoles, outerVertices, holes);
                 break;
                 
             case TriangulationMethodCentroidFan:
-                indices = Triangulation::centroidFanTriangulation(mutableVerts);
+                indices = Triangulation::CentroidFanTriangulation(mutableVerts);
                 break;
                 
             case TriangulationMethodGreedyMaxArea:
-                indices = Triangulation::greedyMaxAreaTriangulation(mutableVerts, shouldHandleConcave, handleHoles, outerVertices, holes);
+                indices = Triangulation::GreedyMaxAreaTriangulation(mutableVerts, shouldHandleConcave, handleHoles, outerVertices, holes);
                 break;
                 
             case TriangulationMethodStrip:
-                indices = Triangulation::stripTriangulation(mutableVerts);
+                indices = Triangulation::StripTriangulation(mutableVerts);
                 break;
                 
             case TriangulationMethodMaxMinArea:
-                indices = Triangulation::maxMinAreaTriangulation(mutableVerts, shouldHandleConcave, handleHoles, outerVertices, holes);
+                indices = Triangulation::MaxMinAreaTriangulation(mutableVerts, shouldHandleConcave, handleHoles, outerVertices, holes);
                 break;
                 
             case TriangulationMethodMinMaxArea:
-                indices = Triangulation::minMaxAreaTriangulation(mutableVerts, shouldHandleConcave, handleHoles, outerVertices, holes);
+                indices = Triangulation::MinMaxAreaTriangulation(mutableVerts, shouldHandleConcave, handleHoles, outerVertices, holes);
                 break;
                 
             case TriangulationMethodConstrainedDelaunay:
-                indices = Triangulation::constrainedDelaunay(mutableVerts);
+                indices = Triangulation::ConstrainedDelaunayTriangulation(mutableVerts);
                 break;
         }
         
@@ -337,35 +337,35 @@ static constexpr uint32_t kDefaultTileSize = 32;
 
     switch (method) {
         case TriangulationMethodEarClipping:
-            indices = Triangulation::earClippingTriangulation(vertices);
+            indices = Triangulation::EarClippingTriangulation(vertices);
             break;
             
         case TriangulationMethodMinimumWeight:
-            indices = Triangulation::minimumWeightTriangulation(vertices, true);
+            indices = Triangulation::MinimumWeightTriangulation(vertices, true);
             break;
             
         case TriangulationMethodCentroidFan:
-            indices = Triangulation::centroidFanTriangulation(vertices);
+            indices = Triangulation::CentroidFanTriangulation(vertices);
             break;
             
         case TriangulationMethodGreedyMaxArea:
-            indices = Triangulation::greedyMaxAreaTriangulation(vertices);
+            indices = Triangulation::GreedyMaxAreaTriangulation(vertices);
             break;
             
         case TriangulationMethodStrip:
-            indices = Triangulation::stripTriangulation(vertices);
+            indices = Triangulation::StripTriangulation(vertices);
             break;
             
         case TriangulationMethodMaxMinArea:
-            indices = Triangulation::maxMinAreaTriangulation(vertices);
+            indices = Triangulation::MaxMinAreaTriangulation(vertices);
             break;
             
         case TriangulationMethodMinMaxArea:
-            indices = Triangulation::minMaxAreaTriangulation(vertices);
+            indices = Triangulation::MinMaxAreaTriangulation(vertices);
             break;
             
         case TriangulationMethodConstrainedDelaunay:
-            return Triangulation::constrainedDelaunay(vertices);
+            return Triangulation::ConstrainedDelaunayTriangulation(vertices);
     }
     
     return indices;
