@@ -119,27 +119,53 @@ kernel void sumOverdrawTexture(
     }
 }
 
-// MARK: - Tile Heatmap
+// MARK: - Helper Invocation Counting
 
-// countsToTexture.metal
-kernel void countsToTexture(
-    device const uint*  tileCounts   [[ buffer(0) ]],
-    constant uint2&     tilesWH      [[ buffer(1) ]],
-    device const uint*  maxBuf       [[ buffer(2) ]],   // << here
-    texture2d<float, access::write> outTex [[ texture(0) ]],
-    uint2 tid [[ thread_position_in_grid ]])
+struct HelperCountVSOut {
+    float4 position [[position]];
+};
+
+// Fragment shader that counts helper invocations per pixel in a buffer.
+// Note: helper invocations are only generated if derivatives are used, so we
+// intentionally sample a texture to force quad execution.
+fragment half4 helperInvocationCountFS(
+    HelperCountVSOut in [[stage_in]],
+    device atomic_uint* helperCounts [[buffer(0)]],
+    constant uint2& framebuffer [[buffer(1)]],
+    texture2d<float> helperTex [[texture(0)]],
+    sampler smp [[sampler(0)]])
 {
-    if (tid.x >= tilesWH.x || tid.y >= tilesWH.y) return;
+    float dummy = helperTex.sample(smp, float2(0.5)).r;
+    (void)dummy;
 
-    const uint idx = tid.y * tilesWH.x + tid.x;
+    if (!simd_is_helper_thread()) {
+        return half4(0.0);
+    }
 
-    // Read the GPU-updated maximum from the 1-u32 buffer
-    const uint maxCount = maxBuf[0];                   // << and here
+    const uint2 pix = uint2(in.position.xy);
+    if (pix.x >= framebuffer.x || pix.y >= framebuffer.y) {
+        return half4(0.0);
+    }
 
-    const float v = (maxCount > 0u)
-        ? float(tileCounts[idx]) / float(maxCount)
-        : 0.0f;
+    const uint idx = pix.y * framebuffer.x + pix.x;
+    atomic_fetch_add_explicit(&helperCounts[idx], 1u, memory_order_relaxed);
+    return half4(0.0);
+}
 
-    outTex.write(float4(v, v, v, 1.0), tid);
+// Compute shader to sum helper count buffer.
+// Returns: buffer[0] = total helper invocations
+//          buffer[1] = unique pixels that had helper invocations
+kernel void sumHelperInvocationCounts(
+    device const uint* counts [[buffer(0)]],
+    device atomic_uint* results [[buffer(1)]],
+    constant uint& countLen [[buffer(2)]],
+    uint tid [[thread_position_in_grid]])
+{
+    if (tid >= countLen) return;
+    const uint c = counts[tid];
+    if (c > 0u) {
+        atomic_fetch_add_explicit(&results[0], c, memory_order_relaxed);
+        atomic_fetch_add_explicit(&results[1], 1u, memory_order_relaxed);
+    }
 }
 

@@ -220,8 +220,11 @@ bool SVGLoader::TessellateSvgToMesh(const std::string& filePath,
 {
     // Default: use CDT
     auto defaultTriangulator = [](const std::vector<Vertex>& verts, bool, bool, const std::vector<Vertex>&, const std::vector<std::vector<Vertex>>&) {
-        return Triangulation::constrainedDelaunay(verts);
+        return Triangulation::ConstrainedDelaunayTriangulation(verts);
     };
-    return TessellateSvgToMesh(filePath, outPositions, outIndices, 
-                               defaultTriangulator, bezierMaxDeviationPx);
+    return TessellateSvgToMesh(filePath,
+                               outPositions,
+                               outIndices,
+                               defaultTriangulator,
+                               bezierMaxDeviationPx);
 }

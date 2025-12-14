@@ -44,6 +44,17 @@ id<MTLRenderPipelineState> MakeOverdrawPipelineState(id<MTLDevice> device,
     return [device newRenderPipelineStateWithDescriptor:d error:error];
 }
 
+id<MTLRenderPipelineState> MakeWireframePipelineState(id<MTLDevice> device,
+                                                     MTKView *view,
+                                                     id<MTLLibrary> library,
+                                                     NSError **error) {
+    MTLRenderPipelineDescriptor *d = CommonPipelineDescriptor(view);
+    d.label = @"WireframePipeline";
+    d.vertexFunction   = [library newFunctionWithName:@"mainVS"];
+    d.fragmentFunction = [library newFunctionWithName:@"wireframeFS"];
+    return [device newRenderPipelineStateWithDescriptor:d error:error];
+}
+
 id<MTLRenderPipelineState> MakeGridOverlayPipelineState(id<MTLDevice> device,
                                                         MTKView *view,
                                                         id<MTLLibrary> library,
@@ -85,6 +96,23 @@ id<MTLRenderPipelineState> MakeOverdrawCountPipelineState(id<MTLDevice> device,
     ca.destinationAlphaBlendFactor = MTLBlendFactorOne;
     
     // No depth attachment needed for overdraw counting
+    d.depthAttachmentPixelFormat = MTLPixelFormatInvalid;
+    
+    return [device newRenderPipelineStateWithDescriptor:d error:error];
+}
+
+id<MTLRenderPipelineState> MakeHelperInvocationCountPipelineState(id<MTLDevice> device,
+                                                                 id<MTLLibrary> library,
+                                                                 NSError **error) {
+    MTLRenderPipelineDescriptor *d = [MTLRenderPipelineDescriptor new];
+    d.label = @"HelperInvocationCountPipeline";
+    d.vertexFunction   = [library newFunctionWithName:@"mainVS"];
+    d.fragmentFunction = [library newFunctionWithName:@"helperInvocationCountFS"];
+    
+    // Dummy color attachment; output is unused but needed to run fragment stage.
+    d.colorAttachments[0].pixelFormat = MTLPixelFormatR8Unorm;
+    
+    // No depth attachment needed for counting pass
     d.depthAttachmentPixelFormat = MTLPixelFormatInvalid;
     
     return [device newRenderPipelineStateWithDescriptor:d error:error];

@@ -52,7 +52,7 @@ You can add UI controls in `Renderer.mm` in the `drawInMTKView` method:
 
 ImGui::Begin("Renderer Controls");
 ImGui::Checkbox("Show Grid", &_showGridOverlay);
-ImGui::Checkbox("Show Heatmap", &_showHeatmap);
+// Heatmap removed; grid overlay now renders grid lines only.
 ImGui::Checkbox("Show Overdraw", &_showOverdraw);
 ImGui::End();
 ```
@@ -83,7 +83,7 @@ ImGui::Begin("Settings");
 
 // Renderer settings
 ImGui::Checkbox("Grid Overlay", &_showGridOverlay);
-ImGui::Checkbox("Heatmap", &_showHeatmap);
+// Heatmap removed; grid overlay now renders grid lines only.
 
 // Slider example
 static float scale = 1.0f;
@@ -111,4 +111,5 @@ ImGui::End();
 
 - [ImGUI Documentation](https://github.com/ocornut/imgui)
 - [ImGUI Examples](https://github.com/ocornut/imgui/tree/master/examples/example_apple_metal)
+
 

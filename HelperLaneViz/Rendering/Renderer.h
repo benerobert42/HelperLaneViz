@@ -18,11 +18,15 @@ typedef NS_ENUM(NSInteger, TriangulationMethod) {
     TriangulationMethodConstrainedDelaunay
 };
 
+typedef NS_ENUM(NSInteger, VisualizationMode) {
+    VisualizationModeHelperLane,  // Helper lane visualization (default)
+    VisualizationModeWireframe,   // Wireframe with fill mode lines
+    VisualizationModeOverdraw      // Overdraw visualization
+};
+
 @interface Renderer : NSObject <MTKViewDelegate>
 
 @property (nonatomic, assign) BOOL showGridOverlay;
-@property (nonatomic, assign) BOOL showHeatmap;    // Only has effect when showGridOverlay is YES
-@property (nonatomic, assign) BOOL showOverdraw;   // Visualize pixel overdraw (how often each pixel is drawn)
 
 - (nonnull instancetype)initWithMetalKitView:(nonnull MTKView *)mtkView;
 
@@ -30,23 +34,17 @@ typedef NS_ENUM(NSInteger, TriangulationMethod) {
 - (BOOL)loadSVGFromPath:(nonnull NSString *)path
     triangulationMethod:(TriangulationMethod)method
        instanceGridCols:(uint32_t)cols
-               gridRows:(uint32_t)rows;
-
-// Run the complete benchmark suite (36 scenes × 7 methods = 252 tests).
-// 3 shapes × 4 vertex counts × 3 instance counts.
-// Results are printed to console and exported as CSV.
-- (void)runDefaultBenchmark;
-
-// Run a quick benchmark with reduced test matrix for faster iteration.
-- (void)runQuickBenchmark;
+               gridRows:(uint32_t)rows
+    bezierMaxDeviationPx:(float)bezierMaxDeviationPx;
 
 // Compute overdraw metrics using GPU rasterization (accurate)
 // Returns total pixel draws and overdraw ratio (totalDraws / uniquePixels)
 - (void)computeOverdrawMetricsWithOverdrawSum:(uint64_t* _Nullable)outSum
                                 overdrawRatio:(double* _Nullable)outRatio;
 
-// GPU Frame Timing - measures end-of-pipe to end-of-pipe frame time
-- (void)startFrameTimeMeasurement:(int)frameCount;
-- (BOOL)isFrameTimeMeasurementActive;
+// Compute helper invocation metrics (GPU-based)
+// Returns total helper invocations and helper ratio (totalHelpers / uniqueHelperPixels)
+- (void)computeHelperInvocationMetricsWithHelperSum:(uint64_t* _Nullable)outSum
+                                       helperRatio:(double* _Nullable)outRatio;
 
 @end

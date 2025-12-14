@@ -19,10 +19,21 @@ id<MTLRenderPipelineState> MakeOverdrawPipelineState(id<MTLDevice> device,
                                                      id<MTLLibrary> library,
                                                      NSError **error);
 
+// Wireframe pipeline - renders with fill mode lines
+id<MTLRenderPipelineState> MakeWireframePipelineState(id<MTLDevice> device,
+                                                     MTKView *view,
+                                                     id<MTLLibrary> library,
+                                                     NSError **error);
+
 // Overdraw counting pipeline - renders to R32Float texture for accurate pixel counting
 id<MTLRenderPipelineState> MakeOverdrawCountPipelineState(id<MTLDevice> device,
                                                           id<MTLLibrary> library,
                                                           NSError **error);
+
+// Helper invocation counting pipeline - renders to a dummy target and writes per-pixel helper counts into a buffer
+id<MTLRenderPipelineState> MakeHelperInvocationCountPipelineState(id<MTLDevice> device,
+                                                                 id<MTLLibrary> library,
+                                                                 NSError **error);
 
 id<MTLRenderPipelineState> MakeGridOverlayPipelineState(id<MTLDevice> device,
                                                         MTKView *view,

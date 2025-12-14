@@ -87,7 +87,7 @@ You can modify `Renderer.mm` to add UI controls:
 
 ImGui::Begin("Renderer Settings");
 ImGui::Checkbox("Show Grid Overlay", &_showGridOverlay);
-ImGui::Checkbox("Show Heatmap", &_showHeatmap);
+// Heatmap removed; grid overlay now renders grid lines only.
 ImGui::Checkbox("Show Overdraw", &_showOverdraw);
 ImGui::End();
 ```
@@ -135,4 +135,5 @@ Once you've added the source files to Xcode:
 4. Start creating your own UI by modifying the code in `Renderer.mm` or creating new UI functions
 
 Happy coding! 🎨
+
 

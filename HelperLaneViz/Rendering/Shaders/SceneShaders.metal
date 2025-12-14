@@ -59,3 +59,8 @@ fragment float4 overdrawFS(MainVSOut in [[stage_in]]) {
     // Green tint helps distinguish from pure white saturation
     return float4(0.05, 0.15, 0.05, 1.0);  // Subtle green per draw
 }
+
+fragment float4 wireframeFS(MainVSOut in [[stage_in]]) {
+    // Simple white wireframe
+    return float4(1.0, 1.0, 1.0, 1.0);
+}

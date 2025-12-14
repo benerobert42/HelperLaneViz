@@ -22,21 +22,14 @@
 }
 
 - (void)drawWithEncoder:(id<MTLRenderCommandEncoder>)encoder
-         heatmapTexture:(id<MTLTexture>)heatmapTexture
                tileSize:(uint32_t)tileSize
-           drawableSize:(CGSize)drawableSize
-            showHeatmap:(BOOL)showHeatmap {
-    
-    // Heatmap texture is required only when showing heatmap
-    if (showHeatmap && !heatmapTexture) return;
+           drawableSize:(CGSize)drawableSize {
     
     GridUniforms uniforms = {
         .tileSize = {tileSize, tileSize},
         .framebuffer = {(uint32_t)drawableSize.width, (uint32_t)drawableSize.height},
         .lineWidth = 1.0f,
-        .lineColor = {1.0f, 1.0f, 1.0f, 0.75f},
-        .fillAlpha = 0.85f,
-        .showHeatmap = showHeatmap ? 1u : 0u
+        .lineColor = {1.0f, 1.0f, 1.0f, 0.75f}
     };
     
     [encoder pushDebugGroup:@"GridOverlay"];
@@ -44,9 +37,6 @@
     [encoder setDepthStencilState:_depthStencilState];
     [encoder setTriangleFillMode:MTLTriangleFillModeFill];
     [encoder setCullMode:MTLCullModeNone];
-    if (heatmapTexture) {
-    [encoder setFragmentTexture:heatmapTexture atIndex:0];
-    }
     [encoder setFragmentBytes:&uniforms length:sizeof(uniforms) atIndex:0];
     [encoder drawPrimitives:MTLPrimitiveTypeTriangle vertexStart:0 vertexCount:3];
     [encoder popDebugGroup];

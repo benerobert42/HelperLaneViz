@@ -15,16 +15,13 @@
 #import "../Geometry/GeometryFactory.h"
 #import "../Geometry/Triangulation.h"
 #import "../InputHandling/SVGLoader.h"
-#import "Measurements/TriangulationBenchmark.h"
-#import "Measurements/GPUFrameTimer.h"
 
 #import <MetalKit/MetalKit.h>
 #import <mach/mach_time.h>
 
-static constexpr uint32_t kDefaultTileSize = 32;
+#include "../../external/imgui/imgui.h"
 
-@interface Renderer () <BenchmarkFrameExecutor>
-@end
+static constexpr uint32_t kDefaultTileSize = 32;
 
 @implementation Renderer {
     // Core Metal objects
@@ -34,6 +31,7 @@ static constexpr uint32_t kDefaultTileSize = 32;
     
     // Render pipelines
     id<MTLRenderPipelineState> _mainPipeline;
+    id<MTLRenderPipelineState> _wireframePipeline;
     id<MTLRenderPipelineState> _gridOverlayPipeline;
     
     // Depth states
@@ -62,7 +60,15 @@ static constexpr uint32_t kDefaultTileSize = 32;
     
     // Visualization flags
     BOOL _showGridOverlay;
-    BOOL _showOverdraw;
+    VisualizationMode _visualizationMode;
+    uint32_t _tileSizePx;
+    
+    // Instance grid and SVG settings
+    uint32_t _instanceGridCols;
+    uint32_t _instanceGridRows;
+    float _bezierMaxDeviationPx;
+    NSString *_currentSVGPath;
+    TriangulationMethod _currentTriangulationMethod;
     
     // Overdraw visualization
     id<MTLRenderPipelineState> _overdrawPipeline;
@@ -73,19 +79,31 @@ static constexpr uint32_t kDefaultTileSize = 32;
     id<MTLTexture> _overdrawCountTexture;
     id<MTLBuffer> _overdrawResultsBuffer;
     
+    // Helper invocation measurement (GPU-based)
+    id<MTLRenderPipelineState> _helperInvocationCountPipeline;
+    id<MTLComputePipelineState> _sumHelperInvocationPipeline;
+    id<MTLTexture> _helperInvocationDummyRT;
+    id<MTLBuffer> _helperInvocationCountsBuffer; // uint32_t per pixel
+    id<MTLBuffer> _helperInvocationResultsBuffer; // 2 uint32: total, unique
+    uint32_t _helperInvocationCountLen; // width*height
+    
     // Helper lane engagement (1x1 dummy texture for forcing derivative computation)
     id<MTLTexture> _helperLaneTexture;
     id<MTLSamplerState> _pointSampler;
     
-    // GPU frame timing
-    GPUFrameTimer _frameTimer;
-    
     // ImGUI
     ImGUIHelper *_imguiHelper;
+    
+    // Cached metrics (computed on demand)
+    uint64_t _lastOverdrawSum;
+    double _lastOverdrawRatio;
+    uint64_t _lastHelperSum;
+    double _lastHelperRatio;
+    TriangulationMetrics::MeshMetrics _lastMeshMetrics;
+    BOOL _hasMeshMetrics;
 }
 
 @synthesize showGridOverlay = _showGridOverlay;
-@synthesize showOverdraw = _showOverdraw;
 
 // MARK: Initialization
 
@@ -100,7 +118,18 @@ static constexpr uint32_t kDefaultTileSize = 32;
     
     // Default visualization settings
     _showGridOverlay = YES;
-    _showOverdraw = NO;
+    _visualizationMode = VisualizationModeHelperLane;
+    _tileSizePx = kDefaultTileSize;
+    _instanceGridCols = 5;
+    _instanceGridRows = 5;
+    _bezierMaxDeviationPx = 1.0f;
+    _currentSVGPath = nil;
+    _currentTriangulationMethod = TriangulationMethodMinMaxArea;
+    _lastOverdrawSum = 0;
+    _lastOverdrawRatio = 0.0;
+    _lastHelperSum = 0;
+    _lastHelperRatio = 0.0;
+    _hasMeshMetrics = NO;
 
     [self setupView];
     [self setupPipelines];
@@ -117,15 +146,14 @@ static constexpr uint32_t kDefaultTileSize = 32;
 //                     instanceGridCols:100
 //                             gridRows:100
 //                         printMetrics:YES];
-    [self loadSVGFromPath:@"/Users/robi/Downloads/146024.svg"
-      triangulationMethod:TriangulationMethodMinMaxArea
-         instanceGridCols:5
-                 gridRows:5];
-
-    uint64_t overdrawSum;
-    double overdrawRatio;
-    [self computeOverdrawMetricsWithOverdrawSum:&overdrawSum overdrawRatio:&overdrawRatio];
-    NSLog(@"Overdraw: sum=%llu, ratio=%.3f", overdrawSum, overdrawRatio);
+    NSString *defaultSVGPath = @"/Users/robi/Downloads/146024.svg";
+    _currentSVGPath = defaultSVGPath;
+    _currentTriangulationMethod = TriangulationMethodMinMaxArea;
+    [self loadSVGFromPath:defaultSVGPath
+      triangulationMethod:_currentTriangulationMethod
+         instanceGridCols:_instanceGridCols
+                 gridRows:_instanceGridRows
+    bezierMaxDeviationPx:_bezierMaxDeviationPx];
 
     return self;
 }
@@ -143,6 +171,9 @@ static constexpr uint32_t kDefaultTileSize = 32;
     _mainPipeline = MakeMainPipelineState(_device, _view, library, &error);
     NSAssert(_mainPipeline, @"Failed to create main pipeline: %@", error);
     
+    _wireframePipeline = MakeWireframePipelineState(_device, _view, library, &error);
+    NSAssert(_wireframePipeline, @"Failed to create wireframe pipeline: %@", error);
+    
     _overdrawPipeline = MakeOverdrawPipelineState(_device, _view, library, &error);
     NSAssert(_overdrawPipeline, @"Failed to create overdraw pipeline: %@", error);
     
@@ -153,6 +184,13 @@ static constexpr uint32_t kDefaultTileSize = 32;
     _sumOverdrawPipeline = [_device newComputePipelineStateWithFunction:sumOverdrawFunc error:&error];
     NSAssert(_sumOverdrawPipeline, @"Failed to create sumOverdraw pipeline: %@", error);
     
+    _helperInvocationCountPipeline = MakeHelperInvocationCountPipelineState(_device, library, &error);
+    NSAssert(_helperInvocationCountPipeline, @"Failed to create helper invocation count pipeline: %@", error);
+    
+    id<MTLFunction> sumHelperFunc = [library newFunctionWithName:@"sumHelperInvocationCounts"];
+    _sumHelperInvocationPipeline = [_device newComputePipelineStateWithFunction:sumHelperFunc error:&error];
+    NSAssert(_sumHelperInvocationPipeline, @"Failed to create sumHelperInvocation pipeline: %@", error);
+    
     _gridOverlayPipeline = MakeGridOverlayPipelineState(_device, _view, library, &error);
     NSAssert(_gridOverlayPipeline, @"Failed to create grid overlay pipeline: %@", error);
     
@@ -162,6 +200,10 @@ static constexpr uint32_t kDefaultTileSize = 32;
     // Allocate overdraw results buffer (2 uints: total draws, unique pixels)
     _overdrawResultsBuffer = [_device newBufferWithLength:sizeof(uint32_t) * 2
                                                   options:MTLResourceStorageModeShared];
+    
+    // Allocate helper invocation results buffer (2 uints: total helpers, unique helper pixels)
+    _helperInvocationResultsBuffer = [_device newBufferWithLength:sizeof(uint32_t) * 2
+                                                         options:MTLResourceStorageModeShared];
     
     // Create 1x1 dummy texture for helper lane engagement
     MTLTextureDescriptor *helperTexDesc = [MTLTextureDescriptor texture2DDescriptorWithPixelFormat:MTLPixelFormatR8Unorm width:1 height:1 mipmapped:NO];
@@ -204,14 +246,15 @@ static constexpr uint32_t kDefaultTileSize = 32;
 
     if (printMetrics) {
         simd_int2 framebufferSize = {(int)_view.drawableSize.width, (int)_view.drawableSize.height};
-        TriangulationMetrics::computeAndPrintMeshMetrics(_currentVertices, _currentIndices, framebufferSize);
+        TriangulationMetrics::computeAndPrintMeshMetrics(_currentVertices, _currentIndices, framebufferSize, {32, 32});
     }
 }
 
 - (BOOL)loadSVGFromPath:(NSString *)path
     triangulationMethod:(TriangulationMethod)method
        instanceGridCols:(uint32_t)cols
-               gridRows:(uint32_t)rows {
+               gridRows:(uint32_t)rows
+    bezierMaxDeviationPx:(float)bezierMaxDeviationPx {
     
     // Create triangulator that uses the selected method
     SVGLoader::Triangulator triangulator = [self, method](const std::vector<Vertex>& verts, bool shouldHandleConcave, bool handleHoles, const std::vector<Vertex>& outerVertices, const std::vector<std::vector<Vertex>>& holes) -> std::vector<uint32_t> {
@@ -258,7 +301,7 @@ static constexpr uint32_t kDefaultTileSize = 32;
     // Tessellate and triangulate each path with the chosen method
     std::vector<Vertex> vertices;
     std::vector<uint32_t> indices;
-    if (!SVGLoader::TessellateSvgToMesh(path.UTF8String, vertices, indices, triangulator, 1.0f)) {
+    if (!SVGLoader::TessellateSvgToMesh(path.UTF8String, vertices, indices, triangulator, bezierMaxDeviationPx)) {
         NSLog(@"Failed to load SVG: %@", path);
         return NO;
     }
@@ -520,20 +563,132 @@ static constexpr uint32_t kDefaultTileSize = 32;
     // Start ImGUI frame
     [_imguiHelper newFrameWithRenderPassDescriptor:renderPassDescriptor];
     
-    // Show example ImGUI window (you can replace this with your own UI code)
-    [_imguiHelper showExampleWindow];
+    // Main UI: visualization controls + metrics
+    ImGui::Begin("HelperLaneViz");
+    
+    // Visualization Mode
+    {
+        const char* vizModes[] = { "Helper Lane", "Wireframe", "Overdraw" };
+        int currentMode = (int)_visualizationMode;
+        if (ImGui::Combo("Visualization Mode", &currentMode, vizModes, 3)) {
+            _visualizationMode = (VisualizationMode)currentMode;
+        }
+    }
+    
+    // Tile Grid
+    {
+        bool showGrid = _showGridOverlay;
+        if (ImGui::Checkbox("Show Tile Grid", &showGrid)) {
+            _showGridOverlay = showGrid ? YES : NO;
+        }
+    }
+    
+    // Tile Size (16x16 or 32x32 only)
+    {
+        int tileSizeIndex = (_tileSizePx == 16) ? 0 : 1;
+        const char* tileSizes[] = { "16x16", "32x32" };
+        if (ImGui::Combo("Tile Size", &tileSizeIndex, tileSizes, 2)) {
+            _tileSizePx = (tileSizeIndex == 0) ? 16 : 32;
+        }
+    }
+    
+    // Instance Grid
+    {
+        int cols = (int)_instanceGridCols;
+        int rows = (int)_instanceGridRows;
+        bool gridChanged = false;
+        if (ImGui::InputInt("Instance Cols", &cols, 1, 10)) {
+            cols = MAX(1, cols);
+            _instanceGridCols = (uint32_t)cols;
+            gridChanged = true;
+        }
+        if (ImGui::InputInt("Instance Rows", &rows, 1, 10)) {
+            rows = MAX(1, rows);
+            _instanceGridRows = (uint32_t)rows;
+            gridChanged = true;
+        }
+        if (gridChanged && _currentSVGPath) {
+            [self loadSVGFromPath:_currentSVGPath
+              triangulationMethod:_currentTriangulationMethod
+                 instanceGridCols:_instanceGridCols
+                         gridRows:_instanceGridRows
+            bezierMaxDeviationPx:_bezierMaxDeviationPx];
+        }
+    }
+    
+    // Max Bezier Deviation
+    {
+        float bezierDev = _bezierMaxDeviationPx;
+        if (ImGui::SliderFloat("Max Bezier Deviation (px)", &bezierDev, 0.1f, 50.0f, "%.1f")) {
+            _bezierMaxDeviationPx = bezierDev;
+            if (_currentSVGPath) {
+                [self loadSVGFromPath:_currentSVGPath
+                  triangulationMethod:_currentTriangulationMethod
+                     instanceGridCols:_instanceGridCols
+                             gridRows:_instanceGridRows
+                bezierMaxDeviationPx:_bezierMaxDeviationPx];
+            }
+        }
+    }
+    
+    ImGui::Separator();
+    
+    if (ImGui::Button("Compute Overdraw Summary")) {
+        [self computeOverdrawMetricsWithOverdrawSum:&_lastOverdrawSum overdrawRatio:&_lastOverdrawRatio];
+    }
+    ImGui::SameLine();
+    ImGui::Text("Total=%llu  Ratio=%.3f", _lastOverdrawSum, _lastOverdrawRatio);
+    
+    if (ImGui::Button("Compute Helper Invocation Summary")) {
+        [self computeHelperInvocationMetricsWithHelperSum:&_lastHelperSum helperRatio:&_lastHelperRatio];
+    }
+    ImGui::SameLine();
+    ImGui::Text("Total=%llu  Ratio=%.3f", _lastHelperSum, _lastHelperRatio);
+    
+    if (ImGui::Button("Compute Tile Stats (CPU)")) {
+        if (!_currentVertices.empty() && !_currentIndices.empty()) {
+            simd_int2 fb = {(int)view.drawableSize.width, (int)view.drawableSize.height};
+            simd_int2 tile = {(int)_tileSizePx, (int)_tileSizePx};
+            _lastMeshMetrics = TriangulationMetrics::computeMeshMetrics(_currentVertices, _currentIndices, fb, tile);
+            _hasMeshMetrics = YES;
+        } else {
+            _hasMeshMetrics = NO;
+        }
+    }
+    if (_hasMeshMetrics) {
+        ImGui::Text("Tris=%zu  TotalTileOverlaps=%.0f  BCI=%.3f",
+                    _lastMeshMetrics.triangleCount,
+                    _lastMeshMetrics.totalTileOverlaps,
+                    _lastMeshMetrics.binningCostIndex);
+        ImGui::Text("Tris/Tile mean=%.2f med=%.2f p95=%.2f",
+                    _lastMeshMetrics.trianglesPerTile_Mean,
+                    _lastMeshMetrics.trianglesPerTile_Median,
+                    _lastMeshMetrics.trianglesPerTile_P95);
+        ImGui::Text("Tiles/Tri mean=%.2f med=%.2f p95=%.2f",
+                    _lastMeshMetrics.tilesPerTriangle_Mean,
+                    _lastMeshMetrics.tilesPerTriangle_Median,
+                    _lastMeshMetrics.tilesPerTriangle_P95);
+    }
+    ImGui::End();
     
     id<MTLRenderCommandEncoder> encoder = [commandBuffer renderCommandEncoderWithDescriptor:renderPassDescriptor];
     
-    // Choose between overdraw visualization and normal rendering
-    if (_showOverdraw) {
-        [self encodeOverdrawGeometryWithEncoder:encoder];
-    } else {
-        [self encodeMainGeometryWithEncoder:encoder];
+    // Choose rendering mode based on visualization mode
+    switch (_visualizationMode) {
+        case VisualizationModeOverdraw:
+            [self encodeOverdrawGeometryWithEncoder:encoder];
+            break;
+        case VisualizationModeWireframe:
+            [self encodeWireframeGeometryWithEncoder:encoder];
+            break;
+        case VisualizationModeHelperLane:
+        default:
+            [self encodeMainGeometryWithEncoder:encoder];
+            break;
     }
 
     // Draw grid overlay if enabled (not shown during overdraw mode)
-    if (_showGridOverlay && !_showOverdraw) {
+    if (_showGridOverlay && _visualizationMode != VisualizationModeOverdraw) {
         [self encodeGridOverlayWithEncoder:encoder drawableSize:view.drawableSize];
     }
     
@@ -543,13 +698,6 @@ static constexpr uint32_t kDefaultTileSize = 32;
     [encoder endEncoding];
     [commandBuffer presentDrawable:view.currentDrawable];
     
-    // Record GPU execution time for frame timing measurement (zero overhead)
-    if (_frameTimer.isActive()) {
-        [commandBuffer addCompletedHandler:^(id<MTLCommandBuffer> buffer) {
-            self->_frameTimer.recordGPUEndTime(buffer.GPUStartTime, buffer.GPUEndTime);
-        }];
-    }
-    
     [commandBuffer commit];
 }
 
@@ -557,7 +705,7 @@ static constexpr uint32_t kDefaultTileSize = 32;
     [encoder setRenderPipelineState:_mainPipeline];
     [encoder setDepthStencilState:_depthState];
     [encoder setCullMode:MTLCullModeNone];
-    [encoder setTriangleFillMode:MTLTriangleFillModeLines];
+    [encoder setTriangleFillMode:MTLTriangleFillModeFill]; // Fill for helper lane visualization
 
     FrameConstants frameConstants = {
         .viewProjectionMatrix = _viewProjectionMatrix,
@@ -571,6 +719,32 @@ static constexpr uint32_t kDefaultTileSize = 32;
     // Bind dummy texture to engage helper lanes via texture sampling
     [encoder setFragmentTexture:_helperLaneTexture atIndex:0];
     [encoder setFragmentSamplerState:_pointSampler atIndex:0];
+    
+    const NSUInteger indexCount = _indexBuffer.length / sizeof(uint32_t);
+    const NSUInteger instanceCount = _gridParams.cols * _gridParams.rows;
+    
+    [encoder drawIndexedPrimitives:MTLPrimitiveTypeTriangle
+                        indexCount:indexCount
+                         indexType:MTLIndexTypeUInt32
+                       indexBuffer:_indexBuffer
+                 indexBufferOffset:0
+                     instanceCount:instanceCount];
+}
+
+- (void)encodeWireframeGeometryWithEncoder:(id<MTLRenderCommandEncoder>)encoder {
+    [encoder setRenderPipelineState:_wireframePipeline];
+    [encoder setDepthStencilState:_depthState];
+    [encoder setCullMode:MTLCullModeNone];
+    [encoder setTriangleFillMode:MTLTriangleFillModeLines]; // Lines for wireframe
+
+    FrameConstants frameConstants = {
+        .viewProjectionMatrix = _viewProjectionMatrix,
+        .viewPortSize = _viewportSize
+    };
+    
+    [encoder setVertexBuffer:_vertexBuffer offset:0 atIndex:VertexInputIndexVertices];
+    [encoder setVertexBytes:&frameConstants length:sizeof(frameConstants) atIndex:VertexInputIndexFrameConstants];
+    [encoder setVertexBytes:&_gridParams length:sizeof(_gridParams) atIndex:VertexInputGridParams];
     
     const NSUInteger indexCount = _indexBuffer.length / sizeof(uint32_t);
     const NSUInteger instanceCount = _gridParams.cols * _gridParams.rows;
@@ -624,21 +798,118 @@ static constexpr uint32_t kDefaultTileSize = 32;
     [encoder setViewport:viewport];
     
     [_gridOverlay drawWithEncoder:encoder
+                         tileSize:_tileSizePx
                      drawableSize:drawableSize];
 }
 
+// MARK: - Helper Invocation Measurement (GPU-based)
 
-// MARK: - GPU Frame Timing
-
-- (void)startFrameTimeMeasurement:(int)frameCount {
-    printf("⏱️  Starting GPU frame time measurement (%d frames)...\n", frameCount);
-    _frameTimer.startMeasurement(frameCount, [](const GPUFrameTimer::Results& results) {
-        results.print();
-    });
+- (void)reallocateHelperInvocationResourcesIfNeeded {
+    const uint32_t width = (uint32_t)_view.drawableSize.width;
+    const uint32_t height = (uint32_t)_view.drawableSize.height;
+    if (width == 0 || height == 0) return;
+    
+    const uint32_t len = width * height;
+    if (_helperInvocationCountsBuffer && _helperInvocationCountLen == len && _helperInvocationDummyRT &&
+        _helperInvocationDummyRT.width == width && _helperInvocationDummyRT.height == height) {
+        return;
+    }
+    
+    _helperInvocationCountLen = len;
+    _helperInvocationCountsBuffer = [_device newBufferWithLength:sizeof(uint32_t) * (NSUInteger)len
+                                                        options:MTLResourceStorageModeShared];
+    
+    MTLTextureDescriptor *desc = [MTLTextureDescriptor texture2DDescriptorWithPixelFormat:MTLPixelFormatR8Unorm
+                                                                                   width:width
+                                                                                  height:height
+                                                                               mipmapped:NO];
+    desc.usage = MTLTextureUsageRenderTarget;
+    desc.storageMode = MTLStorageModePrivate;
+    _helperInvocationDummyRT = [_device newTextureWithDescriptor:desc];
 }
 
-- (BOOL)isFrameTimeMeasurementActive {
-    return _frameTimer.isActive();
+- (void)computeHelperInvocationMetricsWithHelperSum:(uint64_t*)outSum helperRatio:(double*)outRatio {
+    if (!_vertexBuffer || !_indexBuffer) {
+        if (outSum) *outSum = 0;
+        if (outRatio) *outRatio = 0.0;
+        return;
+    }
+    
+    [self reallocateHelperInvocationResourcesIfNeeded];
+    if (!_helperInvocationCountsBuffer || !_helperInvocationDummyRT || _helperInvocationCountLen == 0) {
+        if (outSum) *outSum = 0;
+        if (outRatio) *outRatio = 0.0;
+        return;
+    }
+    
+    id<MTLCommandBuffer> commandBuffer = [_commandQueue commandBuffer];
+    
+    // Clear per-pixel helper count buffer on GPU
+    id<MTLBlitCommandEncoder> blit = [commandBuffer blitCommandEncoder];
+    [blit fillBuffer:_helperInvocationCountsBuffer range:NSMakeRange(0, _helperInvocationCountsBuffer.length) value:0];
+    [blit endEncoding];
+    
+    // Clear results buffer on CPU (shared)
+    uint32_t* resultsPtr = (uint32_t*)_helperInvocationResultsBuffer.contents;
+    resultsPtr[0] = 0; // total helpers
+    resultsPtr[1] = 0; // unique helper pixels
+    
+    // Render pass to run fragment stage (counts are written into helperCounts buffer)
+    MTLRenderPassDescriptor *rp = [MTLRenderPassDescriptor new];
+    rp.colorAttachments[0].texture = _helperInvocationDummyRT;
+    rp.colorAttachments[0].loadAction = MTLLoadActionDontCare;
+    rp.colorAttachments[0].storeAction = MTLStoreActionDontCare;
+    
+    id<MTLRenderCommandEncoder> re = [commandBuffer renderCommandEncoderWithDescriptor:rp];
+    [re setRenderPipelineState:_helperInvocationCountPipeline];
+    [re setCullMode:MTLCullModeNone];
+    [re setTriangleFillMode:MTLTriangleFillModeFill];
+    
+    FrameConstants frameConstants = {
+        .viewProjectionMatrix = _viewProjectionMatrix,
+        .viewPortSize = _viewportSize
+    };
+    [re setVertexBuffer:_vertexBuffer offset:0 atIndex:VertexInputIndexVertices];
+    [re setVertexBytes:&frameConstants length:sizeof(frameConstants) atIndex:VertexInputIndexFrameConstants];
+    [re setVertexBytes:&_gridParams length:sizeof(_gridParams) atIndex:VertexInputGridParams];
+    
+    const uint32_t fb[2] = {(uint32_t)_view.drawableSize.width, (uint32_t)_view.drawableSize.height};
+    [re setFragmentBuffer:_helperInvocationCountsBuffer offset:0 atIndex:0];
+    [re setFragmentBytes:&fb length:sizeof(fb) atIndex:1];
+    [re setFragmentTexture:_helperLaneTexture atIndex:0];
+    [re setFragmentSamplerState:_pointSampler atIndex:0];
+    
+    const NSUInteger indexCount = _indexBuffer.length / sizeof(uint32_t);
+    const NSUInteger instanceCount = _gridParams.cols * _gridParams.rows;
+    [re drawIndexedPrimitives:MTLPrimitiveTypeTriangle
+                   indexCount:indexCount
+                    indexType:MTLIndexTypeUInt32
+                  indexBuffer:_indexBuffer
+            indexBufferOffset:0
+                instanceCount:instanceCount];
+    [re endEncoding];
+    
+    // Sum helper counts (compute)
+    id<MTLComputeCommandEncoder> ce = [commandBuffer computeCommandEncoder];
+    [ce setComputePipelineState:_sumHelperInvocationPipeline];
+    [ce setBuffer:_helperInvocationCountsBuffer offset:0 atIndex:0];
+    [ce setBuffer:_helperInvocationResultsBuffer offset:0 atIndex:1];
+    uint32_t len = _helperInvocationCountLen;
+    [ce setBytes:&len length:sizeof(len) atIndex:2];
+    
+    const NSUInteger threadsPerTG = 256;
+    [ce dispatchThreads:MTLSizeMake(len, 1, 1)
+  threadsPerThreadgroup:MTLSizeMake(threadsPerTG, 1, 1)];
+    [ce endEncoding];
+    
+    [commandBuffer commit];
+    [commandBuffer waitUntilCompleted];
+    
+    const uint64_t totalHelpers = resultsPtr[0];
+    const uint64_t uniquePixels = resultsPtr[1];
+    
+    if (outSum) *outSum = totalHelpers;
+    if (outRatio) *outRatio = (uniquePixels > 0) ? ((double)totalHelpers / uniquePixels) : 0.0;
 }
 
 @end
