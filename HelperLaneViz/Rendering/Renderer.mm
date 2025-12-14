@@ -56,25 +56,12 @@ static constexpr uint32_t kDefaultTileSize = 32;
     vector_uint2 _viewportSize;
     simd_float4x4 _viewProjectionMatrix;
     
-    // Tile heatmap compute pipelines
-    id<MTLComputePipelineState> _binTrianglesPipeline;
-    id<MTLComputePipelineState> _countsToTexturePipeline;
-    
-    // Tile heatmap resources
-    id<MTLBuffer> _tileCountsBuffer;
-    id<MTLBuffer> _maxCountBuffer;
-    id<MTLTexture> _heatmapTexture;
-    uint32_t _tileCountX;
-    uint32_t _tileCountY;
-    uint32_t _tileSizePixels;
-    
     // GPU timing
     double _lastGPUTime;
     dispatch_semaphore_t _frameSemaphore;
     
     // Visualization flags
     BOOL _showGridOverlay;
-    BOOL _showHeatmap;
     BOOL _showOverdraw;
     
     // Overdraw visualization
@@ -98,7 +85,6 @@ static constexpr uint32_t kDefaultTileSize = 32;
 }
 
 @synthesize showGridOverlay = _showGridOverlay;
-@synthesize showHeatmap = _showHeatmap;
 @synthesize showOverdraw = _showOverdraw;
 
 // MARK: Initialization
@@ -114,14 +100,12 @@ static constexpr uint32_t kDefaultTileSize = 32;
     
     // Default visualization settings
     _showGridOverlay = YES;
-    _showHeatmap = NO;
     _showOverdraw = NO;
 
     [self setupView];
     [self setupPipelines];
     [self setupGridOverlay];
-    [self setupTileHeatmapPipelines];
-    
+
     // Initialize ImGUI
     _imguiHelper = [[ImGUIHelper alloc] initWithDevice:_device view:mtkView];
     
@@ -133,8 +117,8 @@ static constexpr uint32_t kDefaultTileSize = 32;
 //                     instanceGridCols:100
 //                             gridRows:100
 //                         printMetrics:YES];
-    [self loadSVGFromPath:@"/Users/robi/Downloads/2052062.svg"
-      triangulationMethod:TriangulationMethodMinimumWeight
+    [self loadSVGFromPath:@"/Users/robi/Downloads/146024.svg"
+      triangulationMethod:TriangulationMethodMinMaxArea
          instanceGridCols:5
                  gridRows:5];
 
@@ -150,10 +134,6 @@ static constexpr uint32_t kDefaultTileSize = 32;
     _view.clearColor = MTLClearColorMake(0, 0, 0, 1);
     _view.depthStencilPixelFormat = MTLPixelFormatDepth32Float;
     _view.clearDepth = 1.0;
-    
-    _tileSizePixels = kDefaultTileSize;
-    _tileCountX = 0;
-    _tileCountY = 0;
 }
 
 - (void)setupPipelines {
@@ -200,19 +180,6 @@ static constexpr uint32_t kDefaultTileSize = 32;
                                             depthStencilState:_noDepthState];
 }
 
-- (void)setupTileHeatmapPipelines {
-    NSError *error = nil;
-    id<MTLLibrary> library = [_device newDefaultLibrary];
-    
-    id<MTLFunction> binTrianglesFunc = [library newFunctionWithName:@"binTrianglesToTiles"];
-    _binTrianglesPipeline = [_device newComputePipelineStateWithFunction:binTrianglesFunc error:&error];
-    NSAssert(_binTrianglesPipeline, @"Failed to create binTrianglesToTiles pipeline: %@", error);
-    
-    id<MTLFunction> countsToTextureFunc = [library newFunctionWithName:@"countsToTexture"];
-    _countsToTexturePipeline = [_device newComputePipelineStateWithFunction:countsToTextureFunc error:&error];
-    NSAssert(_countsToTexturePipeline, @"Failed to create countsToTexture pipeline: %@", error);
-}
-
 // MARK: - Geometry Setup
 
 - (void)setupEllipseWithVertexCount:(int)vertexCount
@@ -237,25 +204,8 @@ static constexpr uint32_t kDefaultTileSize = 32;
 
     if (printMetrics) {
         simd_int2 framebufferSize = {(int)_view.drawableSize.width, (int)_view.drawableSize.height};
-        simd_int2 tileSize = {(int)_tileSizePixels, (int)_tileSizePixels};
-        TriangulationMetrics::computeAndPrintMeshMetrics(_currentVertices, _currentIndices, framebufferSize, tileSize);
+        TriangulationMetrics::computeAndPrintMeshMetrics(_currentVertices, _currentIndices, framebufferSize);
     }
-}
-
-- (void)setupCircleWithVertexCount:(int)vertexCount
-                            radius:(float)radius
-               triangulationMethod:(TriangulationMethod)method
-                  instanceGridCols:(uint32_t)cols
-                          gridRows:(uint32_t)rows
-                      printMetrics:(BOOL)printMetrics {
-    
-    [self setupEllipseWithVertexCount:vertexCount
-                        semiMajorAxis:radius
-                        semiMinorAxis:radius
-                  triangulationMethod:method
-                     instanceGridCols:cols
-                             gridRows:rows
-                         printMetrics:printMetrics];
 }
 
 - (BOOL)loadSVGFromPath:(NSString *)path
@@ -458,112 +408,6 @@ static constexpr uint32_t kDefaultTileSize = 32;
     };
 }
 
-// MARK: - Tile Heatmap Computation
-
-- (void)prepareTileHeatmapWithCommandBuffer:(id<MTLCommandBuffer>)commandBuffer {
-    if (!_vertexBuffer || !_indexBuffer) return;
-    
-    const uint32_t framebufferWidth = (uint32_t)_view.drawableSize.width;
-    const uint32_t framebufferHeight = (uint32_t)_view.drawableSize.height;
-    const uint32_t tilesX = (framebufferWidth + _tileSizePixels - 1) / _tileSizePixels;
-    const uint32_t tilesY = (framebufferHeight + _tileSizePixels - 1) / _tileSizePixels;
-    const size_t tileCount = (size_t)tilesX * tilesY;
-    
-    [self reallocateTileResourcesIfNeededWithTilesX:tilesX tilesY:tilesY tileCount:tileCount];
-    
-    memset(_tileCountsBuffer.contents, 0, tileCount * sizeof(uint32_t));
-    *(uint32_t *)_maxCountBuffer.contents = 0;
-    
-    [self dispatchTriangleBinningWithCommandBuffer:commandBuffer
-                                  framebufferWidth:framebufferWidth
-                                 framebufferHeight:framebufferHeight];
-    
-    [self dispatchCountsToTextureWithCommandBuffer:commandBuffer];
-}
-
-- (void)reallocateTileResourcesIfNeededWithTilesX:(uint32_t)tilesX
-                                           tilesY:(uint32_t)tilesY
-                                        tileCount:(size_t)tileCount {
-    
-    const BOOL needsReallocation = (!_tileCountsBuffer || tilesX != _tileCountX || tilesY != _tileCountY);
-    if (!needsReallocation) return;
-    
-    _tileCountX = tilesX;
-    _tileCountY = tilesY;
-    
-    _tileCountsBuffer = [_device newBufferWithLength:tileCount * sizeof(uint32_t)
-                                             options:MTLResourceStorageModeShared];
-    
-    MTLTextureDescriptor *descriptor = [MTLTextureDescriptor
-        texture2DDescriptorWithPixelFormat:MTLPixelFormatRGBA8Unorm
-                                     width:tilesX
-                                    height:tilesY
-                                 mipmapped:NO];
-    descriptor.usage = MTLTextureUsageShaderWrite | MTLTextureUsageShaderRead;
-    _heatmapTexture = [_device newTextureWithDescriptor:descriptor];
-    
-    if (!_maxCountBuffer) {
-        _maxCountBuffer = [_device newBufferWithLength:sizeof(uint32_t)
-                                               options:MTLResourceStorageModeShared];
-    }
-}
-
-- (void)dispatchTriangleBinningWithCommandBuffer:(id<MTLCommandBuffer>)commandBuffer
-                                framebufferWidth:(uint32_t)framebufferWidth
-                               framebufferHeight:(uint32_t)framebufferHeight {
-    
-    const uint32_t indexCount = (uint32_t)(_indexBuffer.length / sizeof(uint32_t));
-    const uint32_t triangleCount = indexCount / 3;
-    
-    if (triangleCount == 0) return;
-    
-    id<MTLComputeCommandEncoder> encoder = [commandBuffer computeCommandEncoder];
-    [encoder setComputePipelineState:_binTrianglesPipeline];
-    
-    [encoder setBuffer:_vertexBuffer offset:0 atIndex:0];
-    [encoder setBuffer:_indexBuffer offset:0 atIndex:1];
-    
-    struct { simd_float4x4 viewProjectionMatrix; } vpUniforms = { _viewProjectionMatrix };
-    [encoder setBytes:&vpUniforms length:sizeof(vpUniforms) atIndex:2];
-    
-    struct {
-        simd_uint2 framebufferSize;
-        simd_uint2 tileSize;
-        uint32_t indexCount;
-        uint32_t _padding;
-    } binUniforms = {
-        .framebufferSize = {framebufferWidth, framebufferHeight},
-        .tileSize = {_tileSizePixels, _tileSizePixels},
-        .indexCount = indexCount,
-        ._padding = 0
-    };
-    [encoder setBytes:&binUniforms length:sizeof(binUniforms) atIndex:3];
-    
-    [encoder setBuffer:_tileCountsBuffer offset:0 atIndex:4];
-    [encoder setBuffer:_maxCountBuffer offset:0 atIndex:5];
-    
-    [encoder dispatchThreads:MTLSizeMake(triangleCount, 1, 1)
-       threadsPerThreadgroup:MTLSizeMake(64, 1, 1)];
-    [encoder endEncoding];
-}
-
-- (void)dispatchCountsToTextureWithCommandBuffer:(id<MTLCommandBuffer>)commandBuffer {
-    id<MTLComputeCommandEncoder> encoder = [commandBuffer computeCommandEncoder];
-    [encoder setComputePipelineState:_countsToTexturePipeline];
-    
-    [encoder setBuffer:_tileCountsBuffer offset:0 atIndex:0];
-    
-    simd_uint2 tileGridSize = {_tileCountX, _tileCountY};
-    [encoder setBytes:&tileGridSize length:sizeof(tileGridSize) atIndex:1];
-    
-    [encoder setBuffer:_maxCountBuffer offset:0 atIndex:2];
-    [encoder setTexture:_heatmapTexture atIndex:0];
-    
-    [encoder dispatchThreads:MTLSizeMake(_tileCountX, _tileCountY, 1)
-       threadsPerThreadgroup:MTLSizeMake(8, 8, 1)];
-    [encoder endEncoding];
-}
-
 // MARK: - Overdraw Measurement (GPU-based)
 
 - (void)reallocateOverdrawTextureIfNeeded {
@@ -666,11 +510,6 @@ static constexpr uint32_t kDefaultTileSize = 32;
 
 - (void)drawInMTKView:(MTKView *)view {
     id<MTLCommandBuffer> commandBuffer = [_commandQueue commandBuffer];
-    
-    // Prepare heatmap if grid overlay with heatmap is enabled
-    if (_showGridOverlay && _showHeatmap) {
-        [self prepareTileHeatmapWithCommandBuffer:commandBuffer];
-    }
 
     MTLRenderPassDescriptor *renderPassDescriptor = view.currentRenderPassDescriptor;
     if (!renderPassDescriptor) {
@@ -683,9 +522,6 @@ static constexpr uint32_t kDefaultTileSize = 32;
     
     // Show example ImGUI window (you can replace this with your own UI code)
     [_imguiHelper showExampleWindow];
-    
-    renderPassDescriptor.tileWidth = _tileSizePixels;
-    renderPassDescriptor.tileHeight = _tileSizePixels;
     
     id<MTLRenderCommandEncoder> encoder = [commandBuffer renderCommandEncoderWithDescriptor:renderPassDescriptor];
     
@@ -788,150 +624,9 @@ static constexpr uint32_t kDefaultTileSize = 32;
     [encoder setViewport:viewport];
     
     [_gridOverlay drawWithEncoder:encoder
-                   heatmapTexture:_heatmapTexture
-                         tileSize:_tileSizePixels
-                     drawableSize:drawableSize
-                      showHeatmap:_showHeatmap];
+                     drawableSize:drawableSize];
 }
 
-// MARK: - BenchmarkFrameExecutor Protocol
-
-- (double)prepareSceneWithVertexCount:(int)vertexCount
-                        semiMajorAxis:(float)a
-                        semiMinorAxis:(float)b
-                  triangulationMethod:(int)method
-                     instanceGridCols:(uint32_t)cols
-                             gridRows:(uint32_t)rows {
-    
-    // Measure triangulation time
-    uint64_t startTime = mach_absolute_time();
-    
-    [self setupEllipseWithVertexCount:vertexCount
-                        semiMajorAxis:a
-                        semiMinorAxis:b
-                  triangulationMethod:(TriangulationMethod)method
-                     instanceGridCols:cols
-                             gridRows:rows
-                         printMetrics:NO];
-    
-    uint64_t endTime = mach_absolute_time();
-    
-    // Convert to seconds
-    mach_timebase_info_data_t timebase;
-    mach_timebase_info(&timebase);
-    double nanoseconds = (double)(endTime - startTime) * timebase.numer / timebase.denom;
-    return nanoseconds / 1e9;
-}
-
-- (double)executeFrameAndMeasureGPUTime {
-    __block double gpuTime = -1;
-    
-    id<MTLCommandBuffer> commandBuffer = [_commandQueue commandBuffer];
-    
-    // Always prepare and render heatmap during benchmarks
-    [self prepareTileHeatmapWithCommandBuffer:commandBuffer];
-    
-    MTLRenderPassDescriptor *renderPassDescriptor = _view.currentRenderPassDescriptor;
-    if (!renderPassDescriptor) {
-        [commandBuffer commit];
-        [commandBuffer waitUntilCompleted];
-        return -1;
-    }
-    
-    renderPassDescriptor.tileWidth = _tileSizePixels;
-    renderPassDescriptor.tileHeight = _tileSizePixels;
-    
-    id<MTLRenderCommandEncoder> encoder = [commandBuffer renderCommandEncoderWithDescriptor:renderPassDescriptor];
-    
-    [self encodeMainGeometryWithEncoder:encoder];
-    
-    // Always render with heatmap during benchmark for consistent measurements
-    MTLViewport viewport = {
-        .originX = 0,
-        .originY = 0,
-        .width = _view.drawableSize.width,
-        .height = _view.drawableSize.height,
-        .znear = 0,
-        .zfar = 1
-    };
-    [encoder setViewport:viewport];
-    [_gridOverlay drawWithEncoder:encoder
-                   heatmapTexture:_heatmapTexture
-                         tileSize:_tileSizePixels
-                     drawableSize:_view.drawableSize
-                      showHeatmap:YES];
-    
-    [encoder endEncoding];
-    [commandBuffer presentDrawable:_view.currentDrawable];
-    
-    // Use GPU timestamps for accurate timing
-    [commandBuffer addCompletedHandler:^(id<MTLCommandBuffer> buffer) {
-        if (buffer.GPUStartTime > 0 && buffer.GPUEndTime > 0) {
-            gpuTime = buffer.GPUEndTime - buffer.GPUStartTime;
-        }
-    }];
-    
-    [commandBuffer commit];
-    [commandBuffer waitUntilCompleted];
-    
-    return gpuTime;
-}
-
-- (void)getCurrentMeshVertices:(std::vector<Vertex>*)outVertices
-                       indices:(std::vector<uint32_t>*)outIndices {
-    if (outVertices) *outVertices = _currentVertices;
-    if (outIndices) *outIndices = _currentIndices;
-}
-
-// MARK: - Benchmark API
-
-- (void)runDefaultBenchmark {
-    // Use the standard test matrix: 3 shapes × 4 vertex counts × 3 instance counts = 36 scenes
-    Benchmark::BenchmarkConfig config = Benchmark::BenchmarkConfig::standardTestMatrix();
-    config.framebufferSize = {(int)_view.drawableSize.width, (int)_view.drawableSize.height};
-    config.tileSize = _tileSizePixels;
-    
-    [self runBenchmarkInternal:config];
-}
-
-- (void)runQuickBenchmark {
-    // Reduced test set for quick iteration
-    Benchmark::BenchmarkConfig config = Benchmark::BenchmarkConfig::quickTest();
-    config.framebufferSize = {(int)_view.drawableSize.width, (int)_view.drawableSize.height};
-    config.tileSize = _tileSizePixels;
-    
-    [self runBenchmarkInternal:config];
-}
-
-- (void)runBenchmarkInternal:(const Benchmark::BenchmarkConfig&)config {
-    _view.paused = YES;
-    
-    Benchmark::BenchmarkResults results = Benchmark::runBenchmark(self, config);
-    
-    // Print summary table
-    results.printSummary();
-    
-    // Print detailed report
-    results.printDetailedReport();
-    
-    // Export CSV
-    std::string csv = results.toCSV();
-    NSString *csvString = [NSString stringWithUTF8String:csv.c_str()];
-    NSString *tempPath = [NSTemporaryDirectory() stringByAppendingPathComponent:@"triangulation_benchmark.csv"];
-    [csvString writeToFile:tempPath atomically:YES encoding:NSUTF8StringEncoding error:nil];
-    printf("\n📊 CSV exported to: %s\n\n", tempPath.UTF8String);
-    
-    // Restore a default scene
-    [self setupEllipseWithVertexCount:300
-                        semiMajorAxis:1.0f
-                        semiMinorAxis:0.5f
-                  triangulationMethod:TriangulationMethodCentroidFan
-                     instanceGridCols:3
-                             gridRows:3
-                         printMetrics:NO];
-    
-    _view.paused = NO;
-}
 
 // MARK: - GPU Frame Timing
 
