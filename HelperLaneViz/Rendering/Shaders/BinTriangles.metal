@@ -119,53 +119,49 @@ kernel void sumOverdrawTexture(
     }
 }
 
-// MARK: - Helper Invocation Counting
+// MARK: - Helper Lane Counting (texture-based, like overdraw)
 
-struct HelperCountVSOut {
-    float4 position [[position]];
-};
-
-// Fragment shader that counts helper invocations per pixel in a buffer.
-// Note: helper invocations are only generated if derivatives are used, so we
-// intentionally sample a texture to force quad execution.
-fragment half4 helperInvocationCountFS(
-    HelperCountVSOut in [[stage_in]],
-    device atomic_uint* helperCounts [[buffer(0)]],
-    constant uint2& framebuffer [[buffer(1)]],
+// Fragment shader that outputs helper lane count per pixel (0-3).
+// Uses same logic as mainFS visualization but outputs count to texture.
+fragment float helperLaneCountFS(
+    float4 position [[position]],
     texture2d<float> helperTex [[texture(0)]],
     sampler smp [[sampler(0)]])
 {
+    // Sample texture to engage helper lanes (sample() requires derivatives)
     float dummy = helperTex.sample(smp, float2(0.5)).r;
     (void)dummy;
-
-    if (!simd_is_helper_thread()) {
-        return half4(0.0);
-    }
-
-    const uint2 pix = uint2(in.position.xy);
-    if (pix.x >= framebuffer.x || pix.y >= framebuffer.y) {
-        return half4(0.0);
-    }
-
-    const uint idx = pix.y * framebuffer.x + pix.x;
-    atomic_fetch_add_explicit(&helperCounts[idx], 1u, memory_order_relaxed);
-    return half4(0.0);
+    
+    const int isHelperThread = simd_is_helper_thread() ? 1 : 0;
+    
+    // Count helper threads in this 2x2 quad
+    const int sum =
+        quad_shuffle(isHelperThread, 0) +
+        quad_shuffle(isHelperThread, 1) +
+        quad_shuffle(isHelperThread, 2) +
+        quad_shuffle(isHelperThread, 3);
+    
+    return float(sum);
 }
 
-// Compute shader to sum helper count buffer.
-// Returns: buffer[0] = total helper invocations
-//          buffer[1] = unique pixels that had helper invocations
-kernel void sumHelperInvocationCounts(
-    device const uint* counts [[buffer(0)]],
-    device atomic_uint* results [[buffer(1)]],
-    constant uint& countLen [[buffer(2)]],
-    uint tid [[thread_position_in_grid]])
+// Compute shader to sum helper lane texture values
+// Returns: buffer[0] = total helper lane count (sum of all pixels' helper counts)
+//          buffer[1] = unique pixels rendered (pixels with value >= 0)
+kernel void sumHelperLaneTexture(
+    texture2d<float, access::read> helperTex [[ texture(0) ]],
+    device atomic_uint* results [[ buffer(0) ]],
+    uint2 tid [[ thread_position_in_grid ]])
 {
-    if (tid >= countLen) return;
-    const uint c = counts[tid];
-    if (c > 0u) {
-        atomic_fetch_add_explicit(&results[0], c, memory_order_relaxed);
-        atomic_fetch_add_explicit(&results[1], 1u, memory_order_relaxed);
+    uint2 texSize = uint2(helperTex.get_width(), helperTex.get_height());
+    if (tid.x >= texSize.x || tid.y >= texSize.y) return;
+    
+    float value = helperTex.read(tid).r;
+    
+    // Texture cleared to -1; rendered pixels have values 0-3
+    if (value >= 0.0) {
+        uint count = uint(value + 0.5); // Round to nearest integer
+        atomic_fetch_add_explicit(&results[0], count, memory_order_relaxed);  // Total helper count
+        atomic_fetch_add_explicit(&results[1], 1u, memory_order_relaxed);     // Pixels rendered
     }
 }
 

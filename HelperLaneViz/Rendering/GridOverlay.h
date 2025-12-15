@@ -9,8 +9,7 @@
 
 @interface GridOverlay : NSObject
 
-- (instancetype)initWithPipelineState:(id<MTLRenderPipelineState>)pipelineState
-                      depthStencilState:(id<MTLDepthStencilState>)depthState;
+- (instancetype)initWithPipelineState:(id<MTLRenderPipelineState>)pipelineState;
 
 - (void)drawWithEncoder:(id<MTLRenderCommandEncoder>)encoder
                tileSize:(uint32_t)tileSize

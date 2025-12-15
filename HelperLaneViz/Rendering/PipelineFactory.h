@@ -29,17 +29,14 @@ id<MTLRenderPipelineState> MakeOverdrawCountPipelineState(id<MTLDevice> device,
                                                           id<MTLLibrary> library,
                                                           NSError **error);
 
-// Helper invocation counting pipeline - renders to a dummy target and writes per-pixel helper counts into a buffer
-id<MTLRenderPipelineState> MakeHelperInvocationCountPipelineState(id<MTLDevice> device,
-                                                                 id<MTLLibrary> library,
-                                                                 NSError **error);
+// Helper lane counting pipeline - renders helper count (0-3) per pixel to R32Float texture
+id<MTLRenderPipelineState> MakeHelperLaneCountPipelineState(id<MTLDevice> device,
+                                                           id<MTLLibrary> library,
+                                                           NSError **error);
 
 id<MTLRenderPipelineState> MakeGridOverlayPipelineState(id<MTLDevice> device,
                                                         MTKView *view,
                                                         id<MTLLibrary> library,
                                                         NSError **error);
-
-id<MTLDepthStencilState> MakeDepthState(id<MTLDevice> device);
-id<MTLDepthStencilState> MakeNoDepthState(id<MTLDevice> device);
 
 NS_ASSUME_NONNULL_END

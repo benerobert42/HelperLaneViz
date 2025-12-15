@@ -7,6 +7,13 @@
 
 #import <MetalKit/MetalKit.h>
 
+#ifdef __cplusplus
+#import "GeometryManager.h"
+#import "RenderingManager.h"
+#else
+// Forward declarations for Objective-C
+@class GeometryManager;
+@class RenderingManager;
 typedef NS_ENUM(NSInteger, TriangulationMethod) {
     TriangulationMethodEarClipping,
     TriangulationMethodMinimumWeight,
@@ -17,12 +24,15 @@ typedef NS_ENUM(NSInteger, TriangulationMethod) {
     TriangulationMethodMinMaxArea,
     TriangulationMethodConstrainedDelaunay
 };
-
 typedef NS_ENUM(NSInteger, VisualizationMode) {
-    VisualizationModeHelperLane,  // Helper lane visualization (default)
-    VisualizationModeWireframe,   // Wireframe with fill mode lines
-    VisualizationModeOverdraw      // Overdraw visualization
+    VisualizationModeHelperLane,
+    VisualizationModeWireframe,
+    VisualizationModeOverdraw
 };
+#endif
+
+// Forward declarations
+@class MetricsComputer;
 
 @interface Renderer : NSObject <MTKViewDelegate>
 
@@ -30,7 +40,6 @@ typedef NS_ENUM(NSInteger, VisualizationMode) {
 
 - (nonnull instancetype)initWithMetalKitView:(nonnull MTKView *)mtkView;
 
-// Load SVG and triangulate with specified method
 - (BOOL)loadSVGFromPath:(nonnull NSString *)path
     triangulationMethod:(TriangulationMethod)method
        instanceGridCols:(uint32_t)cols

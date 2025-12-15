@@ -11,14 +11,11 @@
 
 @implementation GridOverlay {
     id<MTLRenderPipelineState> _pipelineState;
-    id<MTLDepthStencilState> _depthStencilState;
 }
 
-- (instancetype)initWithPipelineState:(id<MTLRenderPipelineState>)pipelineState
-                    depthStencilState:(id<MTLDepthStencilState>)depthState {
+- (instancetype)initWithPipelineState:(id<MTLRenderPipelineState>)pipelineState {
     if ((self = [super init])) {
         _pipelineState = pipelineState;
-        _depthStencilState = depthState;
     }
     return self;
 }
@@ -35,7 +32,6 @@
     
     [encoder pushDebugGroup:@"GridOverlay"];
     [encoder setRenderPipelineState:_pipelineState];
-    [encoder setDepthStencilState:_depthStencilState];
     [encoder setTriangleFillMode:MTLTriangleFillModeFill];
     [encoder setCullMode:MTLCullModeNone];
     [encoder setFragmentBytes:&uniforms length:sizeof(uniforms) atIndex:0];

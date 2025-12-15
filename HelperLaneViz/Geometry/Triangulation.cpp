@@ -364,8 +364,7 @@ std::vector<uint32_t> MaxMinAreaTriangulation(const std::vector<Vertex>& vertice
                         continue;
                     }
                     if (handleHoles &&
-                        !Helpers::IsTriangleValidWithHoles(vertices, A, B, C,
-                                                           outerVertices, holes)) {
+                        !Helpers::IsTriangleValidWithHoles(vertices, A, B, C, outerVertices, holes)) {
                         continue;
                     }
                 } else {
