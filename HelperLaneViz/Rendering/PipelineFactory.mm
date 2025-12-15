@@ -20,7 +20,7 @@ id<MTLRenderPipelineState> MakeMainPipelineState(id<MTLDevice> device,
                                                  NSError **error) {
     MTLRenderPipelineDescriptor *d = CommonPipelineDescriptor(view);
     d.label = @"MainPipeline";
-    d.vertexFunction   = [library newFunctionWithName:@"mainVS"];
+    d.vertexFunction = [library newFunctionWithName:@"mainVS"];
     d.fragmentFunction = [library newFunctionWithName:@"mainFS"];
     return [device newRenderPipelineStateWithDescriptor:d error:error];
 }
@@ -31,15 +31,15 @@ id<MTLRenderPipelineState> MakeOverdrawPipelineState(id<MTLDevice> device,
                                                      NSError **error) {
     MTLRenderPipelineDescriptor *d = CommonPipelineDescriptor(view);
     d.label = @"OverdrawPipeline";
-    d.vertexFunction   = [library newFunctionWithName:@"mainVS"];
+    d.vertexFunction = [library newFunctionWithName:@"mainVS"];
     d.fragmentFunction = [library newFunctionWithName:@"overdrawFS"];
     MTLRenderPipelineColorAttachmentDescriptor *ca = d.colorAttachments[0];
     ca.blendingEnabled = YES;
-    ca.rgbBlendOperation   = MTLBlendOperationAdd;
+    ca.rgbBlendOperation = MTLBlendOperationAdd;
     ca.alphaBlendOperation = MTLBlendOperationAdd;
-    ca.sourceRGBBlendFactor   = MTLBlendFactorOne;
+    ca.sourceRGBBlendFactor = MTLBlendFactorOne;
     ca.destinationRGBBlendFactor = MTLBlendFactorOne;
-    ca.sourceAlphaBlendFactor   = MTLBlendFactorOne;
+    ca.sourceAlphaBlendFactor = MTLBlendFactorOne;
     ca.destinationAlphaBlendFactor = MTLBlendFactorOne;
     return [device newRenderPipelineStateWithDescriptor:d error:error];
 }
@@ -50,7 +50,7 @@ id<MTLRenderPipelineState> MakeWireframePipelineState(id<MTLDevice> device,
                                                      NSError **error) {
     MTLRenderPipelineDescriptor *d = CommonPipelineDescriptor(view);
     d.label = @"WireframePipeline";
-    d.vertexFunction   = [library newFunctionWithName:@"mainVS"];
+    d.vertexFunction = [library newFunctionWithName:@"mainVS"];
     d.fragmentFunction = [library newFunctionWithName:@"wireframeFS"];
     return [device newRenderPipelineStateWithDescriptor:d error:error];
 }
@@ -61,15 +61,15 @@ id<MTLRenderPipelineState> MakeGridOverlayPipelineState(id<MTLDevice> device,
                                                         NSError **error) {
     MTLRenderPipelineDescriptor *d = CommonPipelineDescriptor(view);
     d.label = @"GridOverlayPipeline";
-    d.vertexFunction   = [library newFunctionWithName:@"gridVS"];
+    d.vertexFunction = [library newFunctionWithName:@"gridVS"];
     d.fragmentFunction = [library newFunctionWithName:@"gridFS"];
     MTLRenderPipelineColorAttachmentDescriptor *ca = d.colorAttachments[0];
     ca.blendingEnabled = YES;
-    ca.rgbBlendOperation   = MTLBlendOperationAdd;
+    ca.rgbBlendOperation = MTLBlendOperationAdd;
     ca.alphaBlendOperation = MTLBlendOperationAdd;
-    ca.sourceRGBBlendFactor   = MTLBlendFactorSourceAlpha;
+    ca.sourceRGBBlendFactor = MTLBlendFactorSourceAlpha;
     ca.destinationRGBBlendFactor = MTLBlendFactorOneMinusSourceAlpha;
-    ca.sourceAlphaBlendFactor   = MTLBlendFactorSourceAlpha;
+    ca.sourceAlphaBlendFactor = MTLBlendFactorSourceAlpha;
     ca.destinationAlphaBlendFactor = MTLBlendFactorOneMinusSourceAlpha;
     return [device newRenderPipelineStateWithDescriptor:d error:error];
 }
@@ -82,17 +82,16 @@ id<MTLRenderPipelineState> MakeOverdrawCountPipelineState(id<MTLDevice> device,
     d.vertexFunction   = [library newFunctionWithName:@"mainVS"];
     d.fragmentFunction = [library newFunctionWithName:@"overdrawCountFS"];
     
-    // R32Float color attachment for accurate counting
     d.colorAttachments[0].pixelFormat = MTLPixelFormatR32Float;
     
     // Additive blending: each fragment adds 1.0
     MTLRenderPipelineColorAttachmentDescriptor *ca = d.colorAttachments[0];
     ca.blendingEnabled = YES;
-    ca.rgbBlendOperation   = MTLBlendOperationAdd;
+    ca.rgbBlendOperation = MTLBlendOperationAdd;
     ca.alphaBlendOperation = MTLBlendOperationAdd;
-    ca.sourceRGBBlendFactor   = MTLBlendFactorOne;
+    ca.sourceRGBBlendFactor = MTLBlendFactorOne;
     ca.destinationRGBBlendFactor = MTLBlendFactorOne;
-    ca.sourceAlphaBlendFactor   = MTLBlendFactorOne;
+    ca.sourceAlphaBlendFactor = MTLBlendFactorOne;
     ca.destinationAlphaBlendFactor = MTLBlendFactorOne;
     
     // No depth attachment needed for overdraw counting
@@ -106,7 +105,7 @@ id<MTLRenderPipelineState> MakeHelperInvocationCountPipelineState(id<MTLDevice> 
                                                                  NSError **error) {
     MTLRenderPipelineDescriptor *d = [MTLRenderPipelineDescriptor new];
     d.label = @"HelperInvocationCountPipeline";
-    d.vertexFunction   = [library newFunctionWithName:@"mainVS"];
+    d.vertexFunction = [library newFunctionWithName:@"mainVS"];
     d.fragmentFunction = [library newFunctionWithName:@"helperInvocationCountFS"];
     
     // Dummy color attachment; output is unused but needed to run fragment stage.

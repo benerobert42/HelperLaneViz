@@ -11,7 +11,7 @@
 #import "GridOverlay.h"
 #import "PipelineFactory.h"
 #import "TriangulationMetrics.h"
-#import "ImGUIHelper.h"
+#import "../ThirdParty/ImGUI/ImGUIHelper.h"
 #import "../Geometry/GeometryFactory.h"
 #import "../Geometry/Triangulation.h"
 #import "../InputHandling/SVGLoader.h"
@@ -203,7 +203,7 @@ static constexpr uint32_t kDefaultTileSize = 32;
     
     // Allocate helper invocation results buffer (2 uints: total helpers, unique helper pixels)
     _helperInvocationResultsBuffer = [_device newBufferWithLength:sizeof(uint32_t) * 2
-                                                         options:MTLResourceStorageModeShared];
+                                                          options:MTLResourceStorageModeShared];
     
     // Create 1x1 dummy texture for helper lane engagement
     MTLTextureDescriptor *helperTexDesc = [MTLTextureDescriptor texture2DDescriptorWithPixelFormat:MTLPixelFormatR8Unorm width:1 height:1 mipmapped:NO];

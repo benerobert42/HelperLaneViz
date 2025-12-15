@@ -7,6 +7,8 @@
 
 #import "GridOverlay.h"
 
+#import "ShaderTypes.h"
+
 @implementation GridOverlay {
     id<MTLRenderPipelineState> _pipelineState;
     id<MTLDepthStencilState> _depthStencilState;
@@ -24,7 +26,6 @@
 - (void)drawWithEncoder:(id<MTLRenderCommandEncoder>)encoder
                tileSize:(uint32_t)tileSize
            drawableSize:(CGSize)drawableSize {
-    
     GridUniforms uniforms = {
         .tileSize = {tileSize, tileSize},
         .framebuffer = {(uint32_t)drawableSize.width, (uint32_t)drawableSize.height},

@@ -19,7 +19,6 @@ id<MTLRenderPipelineState> MakeOverdrawPipelineState(id<MTLDevice> device,
                                                      id<MTLLibrary> library,
                                                      NSError **error);
 
-// Wireframe pipeline - renders with fill mode lines
 id<MTLRenderPipelineState> MakeWireframePipelineState(id<MTLDevice> device,
                                                      MTKView *view,
                                                      id<MTLLibrary> library,

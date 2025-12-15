@@ -44,4 +44,9 @@ bool IsTriangleInsidePolygon(const std::vector<Vertex>& poly,
                              int j,
                              int k,
                              const DiagonalTable& diag);
+
+bool IsValidEar(const std::vector<Vertex>& vertices,
+                const std::vector<uint32_t>& polygon,
+                size_t prevIdx, size_t currIdx, size_t nextIdx,
+                bool polygonIsCCW);
 } // namespace TriangulationHelpers

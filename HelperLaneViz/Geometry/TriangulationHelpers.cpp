@@ -205,3 +205,36 @@ bool Triangulation::Helpers::IsTriangleInsidePolygon(const std::vector<Vertex>& 
     return edgeAccepted(i, j) && edgeAccepted(j, k) && edgeAccepted(k, i);
 }
 
+bool Triangulation::Helpers::IsValidEar(const std::vector<Vertex>& vertices,
+                                        const std::vector<uint32_t>& polygon,
+                                        size_t prevIdx, size_t currIdx, size_t nextIdx,
+                                        bool polygonIsCCW) {
+    const size_t n = polygon.size();
+    if (n < 3) {
+        return false;
+    }
+
+    const auto& pPrev = vertices[polygon[prevIdx]].position;
+    const auto& pCurr = vertices[polygon[currIdx]].position;
+    const auto& pNext = vertices[polygon[nextIdx]].position;
+
+    // Check winding: for CCW polygon, ear must be CCW (convex vertex)
+    const double cross = Cross2D(pPrev, pCurr, pNext);
+    if (polygonIsCCW) {
+        if (cross <= 0) return false; // Reflex vertex, not an ear
+    } else {
+        if (cross >= 0) return false; // For CW polygon, ear must be CW
+    }
+
+    // Check that no other polygon vertices are inside this triangle
+    for (size_t i = 0; i < n; ++i) {
+        if (i == prevIdx || i == currIdx || i == nextIdx) continue;
+
+        const auto& testPoint = vertices[polygon[i]].position;
+        if (PointInTriangle(testPoint, pPrev, pCurr, pNext)) {
+            return false;
+        }
+    }
+
+    return true;
+}

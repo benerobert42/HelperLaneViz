@@ -22,7 +22,7 @@
 
 namespace Triangulation {
 
-double calculateTotalEdgeLength(const std::vector<Vertex>& vertices,
+double CalculateTotalEdgeLength(const std::vector<Vertex>& vertices,
                                 const std::vector<uint32_t>& indices) {
     double total = 0.0;
     for (size_t i = 0; i < indices.size(); i += 3) {
@@ -31,7 +31,7 @@ double calculateTotalEdgeLength(const std::vector<Vertex>& vertices,
     return total;
 }
 
-std::vector<Vertex> buildPolygonWithHoles(const std::vector<Vertex>& outer,
+std::vector<Vertex> BuildPolygonWithHoles(const std::vector<Vertex>& outer,
                                           const std::vector<std::vector<Vertex>>& holes) {
     auto outVector = outer;
     for (const auto& hole: holes) {
@@ -42,6 +42,57 @@ std::vector<Vertex> buildPolygonWithHoles(const std::vector<Vertex>& outer,
 
 
 // MARK: Simple triangulations
+std::vector<uint32_t> EarClippingTriangulation(const std::vector<Vertex>& vertices) {
+    std::vector<uint32_t> indices;
+    const size_t n = vertices.size();
+
+    if (n < 3) return indices;
+
+    const bool isCCW = Helpers::PolygonSignedArea(vertices) >= 0.0;
+
+    // Working list of remaining vertex indices
+    std::vector<uint32_t> polygon(n);
+    std::iota(polygon.begin(), polygon.end(), 0);
+
+    indices.reserve((n - 2) * 3);
+
+    // Clip ears until only 3 vertices remain
+    while (polygon.size() > 3) {
+        const size_t size = polygon.size();
+        bool earFound = false;
+
+        for (size_t i = 0; i < size; ++i) {
+            const size_t prev = (i + size - 1) % size;
+            const size_t next = (i + 1) % size;
+
+            if (Helpers::IsValidEar(vertices, polygon, prev, i, next, isCCW)) {
+                // Emit triangle
+                indices.push_back(polygon[prev]);
+                indices.push_back(polygon[i]);
+                indices.push_back(polygon[next]);
+
+                // Remove the ear vertex
+                polygon.erase(polygon.begin() + static_cast<ptrdiff_t>(i));
+                earFound = true;
+                break;
+            }
+        }
+
+        if (!earFound) {
+            break;
+        }
+    }
+
+    // Add final triangle
+    if (polygon.size() == 3) {
+        indices.push_back(polygon[0]);
+        indices.push_back(polygon[1]);
+        indices.push_back(polygon[2]);
+    }
+
+    return indices;
+}
+
 std::vector<uint32_t> CentroidFanTriangulation(std::vector<Vertex>& vertices) {
     std::vector<uint32_t> indices;
     const size_t originalVertexCount = vertices.size();
@@ -307,7 +358,6 @@ std::vector<uint32_t> MaxMinAreaTriangulation(const std::vector<Vertex>& vertice
                 const uint32_t B = ccwOrder[mid];
                 const uint32_t C = ccwOrder[end];
 
-                // Topology checks: concave validity + holes
                 if (needsTopologyChecks) {
                     if (shouldHandleConcave &&
                         !IsTriangleInsidePolygon(vertices, A, B, C, diagTable)) {
@@ -434,7 +484,6 @@ std::vector<uint32_t> MinMaxAreaTriangulation(const std::vector<Vertex>& vertice
                         continue;
                     }
                 } else {
-                    // Convex, no holes: skip degenerate triangles
                     if (Helpers::TriangleArea(vertices, A, B, C) <= 0.0) {
                         continue;
                     }
