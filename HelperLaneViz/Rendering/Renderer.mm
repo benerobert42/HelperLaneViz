@@ -125,7 +125,7 @@
     [_renderingManager renderUIWithGeometry:_geometryManager
                                      metrics:_metricsComputer
                              onGeometryReload:^(NSString *path, TriangulationMethod method, uint32_t cols, uint32_t rows, float bezierDev) {
-        [weakSelf loadSVGFromPath:path
+        [_geometryManager loadSVGFromPath:path
               triangulationMethod:method
                  instanceGridCols:cols
                          gridRows:rows

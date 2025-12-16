@@ -85,15 +85,12 @@
     _pointSampler = [_device newSamplerStateWithDescriptor:samplerDesc];
 }
 
-- (void)reallocateOverdrawTextureIfNeededForSize:(vector_uint2)viewportSize {
+- (id<MTLTexture>)reallocateTextureForSize:(vector_uint2)viewportSize {
     const uint32_t width = viewportSize.x;
     const uint32_t height = viewportSize.y;
-    if (width == 0 || height == 0) return;
-    
-    if (_overdrawCountTexture &&
-        _overdrawCountTexture.width == width &&
-        _overdrawCountTexture.height == height) {
-        return;
+    if (width == 0 || height == 0) {
+        assert("Invalid viewport size");
+        return nullptr;
     }
     
     MTLTextureDescriptor *desc = [MTLTextureDescriptor
@@ -103,28 +100,7 @@
                                  mipmapped:NO];
     desc.usage = MTLTextureUsageRenderTarget | MTLTextureUsageShaderRead;
     desc.storageMode = MTLStorageModePrivate;
-    _overdrawCountTexture = [_device newTextureWithDescriptor:desc];
-}
-
-- (void)reallocateHelperLaneTextureIfNeededForSize:(vector_uint2)viewportSize {
-    const uint32_t width = viewportSize.x;
-    const uint32_t height = viewportSize.y;
-    if (width == 0 || height == 0) return;
-    
-    if (_helperLaneCountTexture &&
-        _helperLaneCountTexture.width == width &&
-        _helperLaneCountTexture.height == height) {
-        return;
-    }
-    
-    MTLTextureDescriptor *desc = [MTLTextureDescriptor
-        texture2DDescriptorWithPixelFormat:MTLPixelFormatR32Float
-                                     width:width
-                                    height:height
-                                 mipmapped:NO];
-    desc.usage = MTLTextureUsageRenderTarget | MTLTextureUsageShaderRead;
-    desc.storageMode = MTLStorageModePrivate;
-    _helperLaneCountTexture = [_device newTextureWithDescriptor:desc];
+    return [_device newTextureWithDescriptor:desc];
 }
 
 - (void)computeOverdrawMetricsWithGeometry:(GeometryManager *)geometry
@@ -137,17 +113,24 @@
     }
     
     const vector_uint2 viewportSize = geometry.viewportSize;
-    [self reallocateOverdrawTextureIfNeededForSize:viewportSize];
-    
+    if (!_overdrawCountTexture ||
+        viewportSize.x != _overdrawCountTexture.width ||
+        viewportSize.y != _overdrawCountTexture.height) {
+        _overdrawCountTexture = [self reallocateTextureForSize:viewportSize];
+    }
+
     if (!_overdrawCountTexture) {
-        if (outSum) *outSum = 0;
-        if (outRatio) *outRatio = 0.0;
+        if (outSum) {
+            *outSum = 0;
+        }
+        if (outRatio) {
+            *outRatio = 0.0;
+        }
         return;
     }
     
     id<MTLCommandBuffer> commandBuffer = [_commandQueue commandBuffer];
     
-    // Render triangles to overdraw count texture (additive blending)
     MTLRenderPassDescriptor *renderPass = [MTLRenderPassDescriptor new];
     renderPass.colorAttachments[0].texture = _overdrawCountTexture;
     renderPass.colorAttachments[0].loadAction = MTLLoadActionClear;
@@ -202,8 +185,12 @@
     uint64_t totalDraws = resultsPtr[0];
     uint64_t uniquePixels = resultsPtr[1];
     
-    if (outSum) *outSum = totalDraws;
-    if (outRatio) *outRatio = (uniquePixels > 0) ? ((double)totalDraws / uniquePixels) : 0.0;
+    if (outSum) {
+        *outSum = totalDraws;
+    }
+    if (outRatio) {
+        *outRatio = (uniquePixels > 0) ? ((double)totalDraws / uniquePixels) : 0.0;
+    }
 }
 
 - (void)computeHelperInvocationMetricsWithGeometry:(GeometryManager *)geometry
@@ -216,8 +203,12 @@
     }
     
     const vector_uint2 viewportSize = geometry.viewportSize;
-    [self reallocateHelperLaneTextureIfNeededForSize:viewportSize];
-    
+    if (!_helperLaneCountTexture ||
+        viewportSize.x != _helperLaneCountTexture.width ||
+        viewportSize.y != _helperLaneCountTexture.height) {
+        _helperLaneCountTexture = [self reallocateTextureForSize:viewportSize];
+    }
+
     if (!_helperLaneCountTexture) {
         if (outSum) *outSum = 0;
         if (outRatio) *outRatio = 0.0;

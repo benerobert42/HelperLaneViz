@@ -14,36 +14,32 @@
 
 namespace TriangulationMetrics {
 
-// =============================================================================
-// MARK: - Helper Functions
-// =============================================================================
-
 namespace {
 
-/// Converts vertex positions to pixel-space triangles for tile overlap analysis.
-std::vector<ttm::TrianglePx> buildPixelTriangles(const std::vector<Vertex>& vertices,
-                                                  const std::vector<uint32_t>& indices,
-                                                  simd_int2 framebufferSize) {
+// Converts vertex positions to pixel-space triangles for tile overlap analysis.
+std::vector<TileMetrics::TrianglePx> buildPixelTriangles(const std::vector<Vertex>& vertices,
+                                                         const std::vector<uint32_t>& indices,
+                                                         simd_int2 framebufferSize) {
     std::vector<simd_float2> ndcPositions;
     ndcPositions.reserve(vertices.size());
-    
+
     for (const auto& vertex : vertices) {
         ndcPositions.push_back(simd_make_float2(vertex.position.x, vertex.position.y));
     }
-    
-    return ttm::buildPixelTrianglesFromNDC(ndcPositions, indices, framebufferSize);
+
+    return TileMetrics::PixelTrianglesFromNDC(ndcPositions, indices, framebufferSize);
 }
 
-/// Creates a canonical edge key where the smaller index comes first.
-/// This ensures edge (A,B) and edge (B,A) produce the same key.
-uint64_t makeCanonicalEdgeKey(uint32_t indexA, uint32_t indexB) {
+// Creates a canonical edge key where the smaller index comes first.
+// This ensures edge (A,B) and edge (B,A) produce the same key.
+uint64_t MakeCanonicalEdgeKey(uint32_t indexA, uint32_t indexB) {
     if (indexA > indexB) {
         std::swap(indexA, indexB);
     }
     return (static_cast<uint64_t>(indexA) << 32) | static_cast<uint64_t>(indexB);
 }
 
-/// Computes edge-related metrics: unique edge count and total edge length.
+// Computes edge-related metrics: unique edge count and total edge length.
 void computeEdgeMetrics(const std::vector<Vertex>& vertices,
                         const std::vector<uint32_t>& indices,
                         size_t& outUniqueEdgeCount,
@@ -59,9 +55,9 @@ void computeEdgeMetrics(const std::vector<Vertex>& vertices,
         const uint32_t vertexIndex1 = indices[baseIndex + 1];
         const uint32_t vertexIndex2 = indices[baseIndex + 2];
         
-        uniqueEdges.insert(makeCanonicalEdgeKey(vertexIndex0, vertexIndex1));
-        uniqueEdges.insert(makeCanonicalEdgeKey(vertexIndex1, vertexIndex2));
-        uniqueEdges.insert(makeCanonicalEdgeKey(vertexIndex2, vertexIndex0));
+        uniqueEdges.insert(MakeCanonicalEdgeKey(vertexIndex0, vertexIndex1));
+        uniqueEdges.insert(MakeCanonicalEdgeKey(vertexIndex1, vertexIndex2));
+        uniqueEdges.insert(MakeCanonicalEdgeKey(vertexIndex2, vertexIndex0));
     }
     
     double totalLength = 0.0;
@@ -85,9 +81,7 @@ void computeEdgeMetrics(const std::vector<Vertex>& vertices,
 
 } // anonymous namespace
 
-// =============================================================================
 // MARK: - Public API
-// =============================================================================
 
 MeshMetrics computeMeshMetrics(const std::vector<Vertex>& vertices,
                                const std::vector<uint32_t>& indices,
@@ -104,8 +98,8 @@ MeshMetrics computeMeshMetrics(const std::vector<Vertex>& vertices,
     
     // Compute tile-based metrics
     const auto pixelTriangles = buildPixelTriangles(vertices, indices, framebufferSize);
-    const ttm::Metrics tileMetrics = ttm::computeTileMetrics(pixelTriangles, framebufferSize, tileSize);
-    
+    const TileMetrics::Metrics tileMetrics = TileMetrics::ComputeTileMetrics(pixelTriangles, framebufferSize, tileSize);
+
     // Transfer triangle metrics
     result.triangleCount = static_cast<size_t>(tileMetrics.triangleCount);
     result.totalTriangleArea = tileMetrics.sumAreaPx;
