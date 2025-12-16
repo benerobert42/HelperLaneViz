@@ -109,15 +109,13 @@ SVGLoader::AABB2 ComputeAABB2(const std::vector<Vertex>& vertices) {
 
 } // anonymous namespace
 
-std::vector<SVGLoader::ShapeWithHoles> SVGLoader::ParseSvgToShapes(
-    const std::string& filePath, float bezierMaxDeviationPx)
-{
+std::vector<SVGLoader::ShapeWithHoles> SVGLoader::ParseSvgToShapes(const std::string& filePath,
+                                                                   float bezierMaxDeviationPx) {
     std::vector<ShapeWithHoles> result;
     
     NSVGimage* image = nsvgParseFromFile(filePath.c_str(), "px", 96.0f);
     if (!image) return result;
     
-    // Process each SVG shape and path - treat each path as a separate shape
     for (NSVGshape* shape = image->shapes; shape; shape = shape->next) {
         if ((shape->flags & NSVG_FLAGS_VISIBLE) == 0) continue;
         
@@ -139,11 +137,10 @@ std::vector<SVGLoader::ShapeWithHoles> SVGLoader::ParseSvgToShapes(
 
             ShapeWithHoles shapeWithHoles;
 
-            if (GetSignedArea(poly) > 0) {
-                shapeWithHoles.holes.push_back(PolyToVertices(poly));
-            } else {
-                shapeWithHoles.outerBoundary = PolyToVertices(poly);
+            if (GetSignedArea(poly) < 0) {
+                std::reverse(poly.begin(), poly.end());
             }
+            shapeWithHoles.outerBoundary = PolyToVertices(poly);
 
             result.push_back(std::move(shapeWithHoles));
         }
@@ -171,32 +168,39 @@ bool SVGLoader::TessellateSvgToMesh(const std::string& filePath,
         return false;
     }
 
-    std::vector<Vertex> allVertices;
-    std::vector<Vertex> outerVertices;
-    std::vector<std::vector<Vertex>> holeVertices;
-
-    for (auto& shape : shapes) {
-        if (shape.outerBoundary.size() < 3) continue;
+    // Helper to triangulate and append a single polygon
+    auto triangulateAndAppend = [&](const std::vector<Vertex>& polygon) {
+        if (polygon.size() < 3) return;
         
-        // Use the provided triangulator directly
-        allVertices.insert(allVertices.end(), shape.outerBoundary.begin(), shape.outerBoundary.end());
-        holeVertices.insert(holeVertices.end(), shape.holes.begin(), shape.holes.end());
-        outerVertices.insert(outerVertices.end(), shape.outerBoundary.begin(), shape.outerBoundary.end());
-    }
+        const uint32_t baseIndex = static_cast<uint32_t>(outPositions.size());
+        std::vector<uint32_t> indices = triangulator(polygon, true);
+        
+        if (indices.empty()) {
+            fprintf(stderr, "SVGLoader: Triangulation failed for polygon with %zu vertices\n", polygon.size());
+            return;
+        }
+        
+        // Append vertices
+        for (const auto& v : polygon) {
+            outPositions.push_back(v);
+        }
+        
+        // Append indices (offset by base)
+        for (uint32_t idx : indices) {
+            outIndices.push_back(baseIndex + idx);
+        }
+    };
 
-    std::vector<uint32_t> indices = triangulator(allVertices,true, true, outerVertices, holeVertices);
-    if (indices.empty()) {
-        fprintf(stderr, "SVGLoader: Triangulation failed");
+    // Process each shape - outer boundary and holes as separate polygons
+    for (auto& shape : shapes) {
+        triangulateAndAppend(shape.outerBoundary);
+        
+        for (auto& hole : shape.holes) {
+            triangulateAndAppend(hole);
+        }
     }
-
-    for (const auto& v : allVertices) {
-        outPositions.push_back(v);
-    }
-    for (uint32_t idx : indices) {
-        outIndices.push_back(idx);
-    }
-
-    fprintf(stderr, "SVGLoader: Output: %zu vertices, %zu triangles\n", 
+    
+    fprintf(stderr, "SVGLoader: Output: %zu vertices, %zu triangles\n",
             outPositions.size(), outIndices.size() / 3);
     
     // Normalize by bounding box
@@ -219,7 +223,7 @@ bool SVGLoader::TessellateSvgToMesh(const std::string& filePath,
                                     float bezierMaxDeviationPx)
 {
     // Default: use CDT
-    auto defaultTriangulator = [](const std::vector<Vertex>& verts, bool, bool, const std::vector<Vertex>&, const std::vector<std::vector<Vertex>>&) {
+    auto defaultTriangulator = [](const std::vector<Vertex>& verts, bool) {
         return Triangulation::ConstrainedDelaunayTriangulation(verts);
     };
     return TessellateSvgToMesh(filePath,

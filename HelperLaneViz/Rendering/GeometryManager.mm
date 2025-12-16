@@ -60,8 +60,8 @@
     _instanceGridRows = rows;
     
     // Create triangulator that uses the selected method
-    SVGLoader::Triangulator triangulator = [self, method](const std::vector<Vertex>& verts, bool shouldHandleConcave, bool handleHoles, const std::vector<Vertex>& outerVertices, const std::vector<std::vector<Vertex>>& holes) -> std::vector<uint32_t> {
-        return [self triangulateVertices:verts method:method shouldHandleConcave:shouldHandleConcave handleHoles:handleHoles outerVertices:outerVertices holes:holes];
+    SVGLoader::Triangulator triangulator = [self, method](const std::vector<Vertex>& verts, bool shouldHandleConcave) -> std::vector<uint32_t> {
+        return [self triangulateVertices:verts method:method shouldHandleConcave:shouldHandleConcave];
     };
     
     // Tessellate and triangulate each path with the chosen method
@@ -134,10 +134,7 @@
 
 - (std::vector<uint32_t>)triangulateVertices:(const std::vector<Vertex>&)vertices
                                        method:(TriangulationMethod)method
-                          shouldHandleConcave:(bool)shouldHandleConcave
-                                   handleHoles:(bool)handleHoles
-                                outerVertices:(const std::vector<Vertex>&)outerVertices
-                                         holes:(const std::vector<std::vector<Vertex>>&)holes {
+                          shouldHandleConcave:(bool)shouldHandleConcave {
     std::vector<Vertex> mutableVerts = vertices;
     std::vector<uint32_t> indices;
     
@@ -147,7 +144,7 @@
             break;
             
         case TriangulationMethodMinimumWeight:
-            indices = Triangulation::MinimumWeightTriangulation(mutableVerts, shouldHandleConcave, handleHoles, outerVertices, holes);
+            indices = Triangulation::MinimumWeightTriangulation(mutableVerts, shouldHandleConcave);
             break;
             
         case TriangulationMethodCentroidFan:
@@ -155,7 +152,7 @@
             break;
             
         case TriangulationMethodGreedyMaxArea:
-            indices = Triangulation::GreedyMaxAreaTriangulation(mutableVerts, shouldHandleConcave, handleHoles, outerVertices, holes);
+            indices = Triangulation::GreedyMaxAreaTriangulation(mutableVerts, shouldHandleConcave);
             break;
             
         case TriangulationMethodStrip:
@@ -163,11 +160,11 @@
             break;
             
         case TriangulationMethodMaxMinArea:
-            indices = Triangulation::MaxMinAreaTriangulation(mutableVerts, shouldHandleConcave, handleHoles, outerVertices, holes);
+            indices = Triangulation::MaxMinAreaTriangulation(mutableVerts, shouldHandleConcave);
             break;
             
         case TriangulationMethodMinMaxArea:
-            indices = Triangulation::MinMaxAreaTriangulation(mutableVerts, shouldHandleConcave, handleHoles, outerVertices, holes);
+            indices = Triangulation::MinMaxAreaTriangulation(mutableVerts, shouldHandleConcave);
             break;
             
         case TriangulationMethodConstrainedDelaunay:

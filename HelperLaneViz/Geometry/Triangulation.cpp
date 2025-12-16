@@ -8,7 +8,6 @@
 #include "Triangulation.h"
 
 #include "TriangulationHelpers.h"
-#include "TriangulationHoles.h"
 
 #include <cmath>
 #include <limits>
@@ -30,16 +29,6 @@ double CalculateTotalEdgeLength(const std::vector<Vertex>& vertices,
     }
     return total;
 }
-
-std::vector<Vertex> BuildPolygonWithHoles(const std::vector<Vertex>& outer,
-                                          const std::vector<std::vector<Vertex>>& holes) {
-    auto outVector = outer;
-    for (const auto& hole: holes) {
-        outVector = Helpers::BuildBridgedPolygonImpl(outVector, hole);
-    }
-    return outVector;
-}
-
 
 // MARK: Simple triangulations
 std::vector<uint32_t> EarClippingTriangulation(const std::vector<Vertex>& vertices) {
@@ -189,20 +178,15 @@ std::vector<uint32_t> StripTriangulation(const std::vector<Vertex>& vertices) {
 
 // MARK: DP triangulations
 std::vector<uint32_t> MinimumWeightTriangulation(const std::vector<Vertex>& vertices,
-                                                 bool shouldHandleConcave,
-                                                 bool handleHoles,
-                                                 const std::vector<Vertex>& outerVertices,
-                                                 const std::vector<std::vector<Vertex>>& holes) {
+                                                 bool shouldHandleConcave) {
     std::vector<uint32_t> indices;
     const int vertexCount = static_cast<int>(vertices.size());
     if (vertexCount < 3) {
         return indices;
     }
 
-    const bool needsTopologyChecks = shouldHandleConcave || handleHoles;
-
     Helpers::DiagonalTable diagTable;
-    if (needsTopologyChecks) {
+    if (shouldHandleConcave) {
         diagTable = Helpers::BuildDiagonalTable(vertices);
     }
 
@@ -233,16 +217,9 @@ std::vector<uint32_t> MinimumWeightTriangulation(const std::vector<Vertex>& vert
             int optimalSplit = -1;
             
             for (int splitPoint = startIndex + 1; splitPoint < endIndex; ++splitPoint) {
-                if (needsTopologyChecks) {
-                    if (shouldHandleConcave) {
-                        if (!IsTriangleInsidePolygon(vertices, startIndex, splitPoint, endIndex, diagTable)) {
-                            continue;
-                        }
-                    }
-                    if (handleHoles) {
-                        if (!Helpers::IsTriangleValidWithHoles(vertices, startIndex, splitPoint, endIndex, outerVertices, holes)) {
-                            continue;
-                        }
+                if (shouldHandleConcave) {
+                    if (!IsTriangleInsidePolygon(vertices, startIndex, splitPoint, endIndex, diagTable)) {
+                        continue;
                     }
                 } else {
                     const double area = Helpers::TriangleArea(vertices, startIndex, splitPoint, endIndex);
@@ -306,20 +283,15 @@ std::vector<uint32_t> MinimumWeightTriangulation(const std::vector<Vertex>& vert
 }
 
 std::vector<uint32_t> MaxMinAreaTriangulation(const std::vector<Vertex>& vertices,
-                                              bool shouldHandleConcave,
-                                              bool handleHoles,
-                                              const std::vector<Vertex>& outerVertices,
-                                              const std::vector<std::vector<Vertex>>& holes) {
+                                              bool shouldHandleConcave) {
     std::vector<uint32_t> indices;
     const int vertexCount = static_cast<int>(vertices.size());
     if (vertexCount < 3) {
         return indices;
     }
 
-    const bool needsTopologyChecks = shouldHandleConcave || handleHoles;
-
     Helpers::DiagonalTable diagTable;
-    if (needsTopologyChecks) {
+    if (shouldHandleConcave) {
         diagTable = Helpers::BuildDiagonalTable(vertices);
     }
 
@@ -358,13 +330,8 @@ std::vector<uint32_t> MaxMinAreaTriangulation(const std::vector<Vertex>& vertice
                 const uint32_t B = ccwOrder[mid];
                 const uint32_t C = ccwOrder[end];
 
-                if (needsTopologyChecks) {
-                    if (shouldHandleConcave &&
-                        !IsTriangleInsidePolygon(vertices, A, B, C, diagTable)) {
-                        continue;
-                    }
-                    if (handleHoles &&
-                        !Helpers::IsTriangleValidWithHoles(vertices, A, B, C, outerVertices, holes)) {
+                if (shouldHandleConcave) {
+                    if (!IsTriangleInsidePolygon(vertices, A, B, C, diagTable)) {
                         continue;
                     }
                 } else {
@@ -422,20 +389,15 @@ std::vector<uint32_t> MaxMinAreaTriangulation(const std::vector<Vertex>& vertice
 }
 
 std::vector<uint32_t> MinMaxAreaTriangulation(const std::vector<Vertex>& vertices,
-                                              bool shouldHandleConcave,
-                                              bool handleHoles,
-                                              const std::vector<Vertex>& outerVertices,
-                                              const std::vector<std::vector<Vertex>>& holes) {
+                                              bool shouldHandleConcave) {
     std::vector<uint32_t> indices;
     const int vertexCount = static_cast<int>(vertices.size());
     if (vertexCount < 3) {
         return indices;
     }
 
-    const bool needsTopologyChecks = shouldHandleConcave || handleHoles;
-
     Helpers::DiagonalTable diagTable;
-    if (needsTopologyChecks) {
+    if (shouldHandleConcave) {
         diagTable = Helpers::BuildDiagonalTable(vertices);
     }
 
@@ -472,14 +434,8 @@ std::vector<uint32_t> MinMaxAreaTriangulation(const std::vector<Vertex>& vertice
                 const uint32_t B = ccwOrder[mid];
                 const uint32_t C = ccwOrder[end];
 
-                if (needsTopologyChecks) {
-                    if (shouldHandleConcave &&
-                        !IsTriangleInsidePolygon(vertices, A, B, C, diagTable)) {
-                        continue;
-                    }
-                    if (handleHoles &&
-                        !Helpers::IsTriangleValidWithHoles(vertices, A, B, C,
-                                                           outerVertices, holes)) {
+                if (shouldHandleConcave) {
+                    if (!IsTriangleInsidePolygon(vertices, A, B, C, diagTable)) {
                         continue;
                     }
                 } else {
@@ -534,7 +490,7 @@ std::vector<uint32_t> MinMaxAreaTriangulation(const std::vector<Vertex>& vertice
 }
 
 // MARK: Max Area and CDT
-std::vector<uint32_t> GreedyMaxAreaTriangulation(const std::vector<Vertex>& vertices, bool shouldHandleConcave, bool handleHoles, const std::vector<Vertex>& outerVertices, const std::vector<std::vector<Vertex>>& holes) {
+std::vector<uint32_t> GreedyMaxAreaTriangulation(const std::vector<Vertex>& vertices, bool shouldHandleConcave) {
     std::vector<uint32_t> indices;
     const size_t vertexCount = vertices.size();
     const auto diagTable = Helpers::BuildDiagonalTable(vertices);
@@ -585,16 +541,10 @@ std::vector<uint32_t> GreedyMaxAreaTriangulation(const std::vector<Vertex>& vert
                         // Calculate area first (needed for both validation and selection)
                         const double area = Helpers::TriangleArea(vertices, vi, vj, vk);
 
-                        // For convex polygons (shouldHandleConcave=false), check triangle has positive area
                         // For concave polygons, we need full validity check
                         if (shouldHandleConcave) {
                             if (!Helpers::IsTriangleInsidePolygon(vertices, static_cast<int>(vi), static_cast<int>(vj), static_cast<int>(vk), diagTable)) {
                                 continue;
-                            }
-                            if (handleHoles) {
-                                if (!Helpers::IsTriangleValidWithHoles(vertices, static_cast<int>(vi), static_cast<int>(vj), static_cast<int>(vk), outerVertices, holes)) {
-                                    continue;;
-                                }
                             }
                         } else {
                             // For convex polygons, still ensure triangle has positive area (degenerate check)
