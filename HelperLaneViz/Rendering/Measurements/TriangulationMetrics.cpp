@@ -16,8 +16,27 @@ namespace TriangulationMetrics {
 
 namespace {
 
+// MARK: NDC to pixel space helpers
+std::vector<TileMetrics::TrianglePx> PixelTrianglesFromNDC(const std::vector<simd_float2>& ndcPositions,
+                                              const std::vector<uint32_t>& indicesTri,
+                                              simd_int2 fb) {
+    auto ndcToPixel = [](simd_float2 ndc, simd_int2 fb) {
+        return simd_int2((ndc * 0.5f + 0.5f) * fb);
+    };
+
+    std::vector<TileMetrics::TrianglePx> out;
+    out.reserve(indicesTri.size() / 3);
+    for (size_t i = 0; i + 2 < indicesTri.size(); i += 3) {
+        const simd_int2 p0 = ndcToPixel(ndcPositions[indicesTri[i + 0]], fb);
+        const simd_int2 p1 = ndcToPixel(ndcPositions[indicesTri[i + 1]], fb);
+        const simd_int2 p2 = ndcToPixel(ndcPositions[indicesTri[i + 2]], fb);
+        out.push_back({ p0, p1, p2 });
+    }
+    return out;
+}
+
 // Converts vertex positions to pixel-space triangles for tile overlap analysis.
-std::vector<TileMetrics::TrianglePx> buildPixelTriangles(const std::vector<Vertex>& vertices,
+std::vector<TileMetrics::TrianglePx> BuildPixelTriangles(const std::vector<Vertex>& vertices,
                                                          const std::vector<uint32_t>& indices,
                                                          simd_int2 framebufferSize) {
     std::vector<simd_float2> ndcPositions;
@@ -27,7 +46,7 @@ std::vector<TileMetrics::TrianglePx> buildPixelTriangles(const std::vector<Verte
         ndcPositions.push_back(simd_make_float2(vertex.position.x, vertex.position.y));
     }
 
-    return TileMetrics::PixelTrianglesFromNDC(ndcPositions, indices, framebufferSize);
+    return PixelTrianglesFromNDC(ndcPositions, indices, framebufferSize);
 }
 
 // Creates a canonical edge key where the smaller index comes first.
@@ -40,7 +59,7 @@ uint64_t MakeCanonicalEdgeKey(uint32_t indexA, uint32_t indexB) {
 }
 
 // Computes edge-related metrics: unique edge count and total edge length.
-void computeEdgeMetrics(const std::vector<Vertex>& vertices,
+void ComputeEdgeMetrics(const std::vector<Vertex>& vertices,
                         const std::vector<uint32_t>& indices,
                         size_t& outUniqueEdgeCount,
                         double& outTotalEdgeLength) {
@@ -81,34 +100,30 @@ void computeEdgeMetrics(const std::vector<Vertex>& vertices,
 
 } // anonymous namespace
 
-// MARK: - Public API
 
-MeshMetrics computeMeshMetrics(const std::vector<Vertex>& vertices,
+MeshMetrics ComputeMeshMetrics(const std::vector<Vertex>& verticesNDC,
                                const std::vector<uint32_t>& indices,
-                               simd_int2 framebufferSize,
-                               simd_int2 tileSize) {
+                               simd_int2 framebufferSizePx,
+                               simd_int2 tileSizePx) {
     MeshMetrics result;
     
-    if (vertices.empty() || indices.size() < 3) {
+    if (verticesNDC.empty() || indices.size() < 3) {
         return result;
     }
     
-    // Compute edge metrics
-    computeEdgeMetrics(vertices, indices, result.uniqueEdgeCount, result.totalEdgeLength);
-    
-    // Compute tile-based metrics
-    const auto pixelTriangles = buildPixelTriangles(vertices, indices, framebufferSize);
-    const TileMetrics::Metrics tileMetrics = TileMetrics::ComputeTileMetrics(pixelTriangles, framebufferSize, tileSize);
+    ComputeEdgeMetrics(verticesNDC, indices, result.uniqueEdgeCount, result.totalEdgeLength);
 
-    // Transfer triangle metrics
+    // Compute tile-based metrics
+    const auto pixelTriangles = BuildPixelTriangles(verticesNDC, indices, framebufferSizePx);
+    const TileMetrics::Metrics tileMetrics = TileMetrics::ComputeTileMetrics(pixelTriangles, framebufferSizePx, tileSizePx);
+
+    // Transfer metrics
     result.triangleCount = static_cast<size_t>(tileMetrics.triangleCount);
     result.totalTriangleArea = tileMetrics.sumAreaPx;
     
-    // Transfer tile overlap metrics
     result.totalTileOverlaps = tileMetrics.totalTilesTouched;
     result.nonEmptyTileCount = static_cast<size_t>(tileMetrics.nonEmptyTileCount);
     
-    // Transfer distribution metrics
     result.trianglesPerTile_Mean = tileMetrics.trianglesPerTileMean;
     result.trianglesPerTile_Median = tileMetrics.trianglesPerTileMedian;
     result.trianglesPerTile_P95 = tileMetrics.trianglesPerTileP95;
@@ -124,60 +139,6 @@ MeshMetrics computeMeshMetrics(const std::vector<Vertex>& vertices,
     // for accurate results. They are initialized to 0 here.
     
     return result;
-}
-
-void printMeshMetrics(const MeshMetrics& metrics,
-                      simd_int2 framebufferSize,
-                      simd_int2 tileSize) {
-    printf("\n");
-    printf("═══════════════════════════════════════════════════════════════════\n");
-    printf("                      MESH TRIANGULATION METRICS                    \n");
-    printf("═══════════════════════════════════════════════════════════════════\n");
-    
-    printf("\n┌─ Configuration ─────────────────────────────────────────────────┐\n");
-    printf("│  Framebuffer:          %d × %d pixels\n", framebufferSize.x, framebufferSize.y);
-    printf("│  Tile Size:            %d × %d pixels\n", tileSize.x, tileSize.y);
-    printf("└──────────────────────────────────────────────────────────────────┘\n");
-    
-    printf("\n┌─ Mesh Summary ──────────────────────────────────────────────────┐\n");
-    printf("│  Triangle Count:       %zu\n", metrics.triangleCount);
-    printf("│  Unique Edge Count:    %zu\n", metrics.uniqueEdgeCount);
-    printf("│  Total Edge Length:    %.4f (NDC units)\n", metrics.totalEdgeLength);
-    printf("│  Total Triangle Area:  %.2f (pixels²)\n", metrics.totalTriangleArea);
-    printf("└──────────────────────────────────────────────────────────────────┘\n");
-    
-    printf("\n┌─ Tile Coverage ──────────────────────────────────────────────────┐\n");
-    printf("│  Total Tile Overlaps:  %.0f\n", metrics.totalTileOverlaps);
-    printf("│  Non-Empty Tiles:      %zu\n", metrics.nonEmptyTileCount);
-    printf("│  Binning Cost Index:   %.3f  (1.0 = ideal, higher = worse)\n", metrics.binningCostIndex);
-    printf("└──────────────────────────────────────────────────────────────────┘\n");
-    
-    printf("\n┌─ Triangles Per Tile (binning pressure) ─────────────────────────┐\n");
-    printf("│  Mean:                 %.2f triangles/tile\n", metrics.trianglesPerTile_Mean);
-    printf("│  Median:               %.2f triangles/tile\n", metrics.trianglesPerTile_Median);
-    printf("│  95th Percentile:      %.2f triangles/tile\n", metrics.trianglesPerTile_P95);
-    printf("└──────────────────────────────────────────────────────────────────┘\n");
-    
-    printf("\n┌─ Tiles Per Triangle (triangle spread) ──────────────────────────┐\n");
-    printf("│  Mean:                 %.2f tiles/triangle\n", metrics.tilesPerTriangle_Mean);
-    printf("│  Median:               %.2f tiles/triangle\n", metrics.tilesPerTriangle_Median);
-    printf("│  95th Percentile:      %.2f tiles/triangle\n", metrics.tilesPerTriangle_P95);
-    printf("└──────────────────────────────────────────────────────────────────┘\n");
-    
-    printf("\n┌─ Overdraw (GPU-measured pixel shader efficiency) ──────────────┐\n");
-    printf("│  Total Pixel Draws:    %llu\n", metrics.overdrawSum);
-    printf("│  Overdraw Ratio:       %.3f  (1.0 = no overdraw, higher = worse)\n", metrics.overdrawRatio);
-    printf("└──────────────────────────────────────────────────────────────────┘\n");
-    
-    printf("\n");
-}
-
-void computeAndPrintMeshMetrics(const std::vector<Vertex>& vertices,
-                                const std::vector<uint32_t>& indices,
-                                simd_int2 framebufferSize,
-                                simd_int2 tileSize) {
-    const MeshMetrics metrics = computeMeshMetrics(vertices, indices, framebufferSize, tileSize);
-    printMeshMetrics(metrics, framebufferSize, tileSize);
 }
 
 } // namespace TriangulationMetrics

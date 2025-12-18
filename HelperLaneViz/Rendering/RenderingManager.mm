@@ -268,7 +268,7 @@
             
             simd_int2 fb = {(int)_view.drawableSize.width, (int)_view.drawableSize.height};
             simd_int2 tile = {(int)_tileSizePx, (int)_tileSizePx};
-            _lastMeshMetrics = TriangulationMetrics::computeMeshMetrics(expandedVertices, expandedIndices, fb, tile);
+            _lastMeshMetrics = TriangulationMetrics::ComputeMeshMetrics(expandedVertices, expandedIndices, fb, tile);
             _hasMeshMetrics = YES;
         } else {
             _hasMeshMetrics = NO;

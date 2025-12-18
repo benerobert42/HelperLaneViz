@@ -24,9 +24,9 @@ struct MeshMetrics {
     double totalTriangleArea = 0.0;
     
     // Tile overlap metrics (GPU binning efficiency)
-    double totalTileOverlaps = 0.0;           ///< Sum of tiles touched by all triangles
-    size_t nonEmptyTileCount = 0;             ///< Number of tiles containing at least one triangle
-    
+    double totalTileOverlaps = 0.0; // Sum of tiles touched by all triangles
+    size_t nonEmptyTileCount = 0; // Number of tiles containing at least one triangle
+
     // Triangles per tile distribution (measures overdraw/binning pressure)
     double trianglesPerTile_Mean = 0.0;
     double trianglesPerTile_Median = 0.0;
@@ -43,30 +43,13 @@ struct MeshMetrics {
     
     // Overdraw metrics (GPU-measured pixel-level shader invocation efficiency)
     // These should be populated via Renderer::computeOverdrawMetricsWithOverdrawSum:overdrawRatio:
-    uint64_t overdrawSum = 0;             ///< Total pixel draws (GPU rasterization count)
-    double overdrawRatio = 0.0;           ///< overdrawSum / uniquePixelsCovered (1.0 = no overdraw)
+    uint64_t overdrawSum = 0; // Total pixel draws (GPU rasterization count)
+    double overdrawRatio = 0.0; // overdrawSum / uniquePixelsCovered (1.0 = no overdraw)
 };
 
-/// Computes comprehensive metrics for a 2D triangulated mesh.
-/// @param vertices      Mesh vertices with positions in NDC space [-1, 1]
-/// @param indices       Triangle indices (3 per triangle)
-/// @param framebufferSize   Framebuffer dimensions in pixels
-/// @param tileSize      Tile dimensions in pixels (typically 32x32 for GPU tile-based renderers)
-/// @return Computed metrics structure
-MeshMetrics computeMeshMetrics(const std::vector<Vertex>& vertices,
+MeshMetrics ComputeMeshMetrics(const std::vector<Vertex>& verticesNDC,
                                const std::vector<uint32_t>& indices,
-                               simd_int2 framebufferSize,
-                               simd_int2 tileSize);
-
-/// Prints mesh metrics to stdout in a readable format.
-void printMeshMetrics(const MeshMetrics& metrics,
-                      simd_int2 framebufferSize,
-                      simd_int2 tileSize);
-
-/// Convenience function: computes and prints metrics in one call.
-void computeAndPrintMeshMetrics(const std::vector<Vertex>& vertices,
-                                const std::vector<uint32_t>& indices,
-                                simd_int2 framebufferSize,
-                                simd_int2 tileSize);
+                               simd_int2 framebufferSizePx,
+                               simd_int2 tileSizePx);
 
 } // namespace TriangulationMetrics

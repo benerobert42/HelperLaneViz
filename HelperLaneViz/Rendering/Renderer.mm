@@ -51,7 +51,7 @@
     // Load default SVG (can be removed or made configurable)
     NSString *defaultSVGPath = @"/Users/robi/Downloads/146024.svg";
     [self loadSVGFromPath:defaultSVGPath
-      triangulationMethod:TriangulationMethodMinMaxArea
+      triangulationMethod:TriangulationMethodMinimumWeight
          instanceGridCols:5
                  gridRows:5
     bezierMaxDeviationPx:1.0f];

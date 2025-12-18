@@ -82,11 +82,6 @@ bool TriangleOverlapsBox(const TrianglePx& tri, simd_int2 boxMin, simd_int2 boxM
         return false;
     }
 
-    const simd_int2 bl = { boxMin.x, boxMin.y };
-    const simd_int2 br = { boxMax.x, boxMin.y };
-    const simd_int2 tl = { boxMin.x, boxMax.y };
-    const simd_int2 tr = { boxMax.x, boxMax.y };
-
     return true;
 }
 
@@ -249,24 +244,4 @@ Metrics ComputeTileMetrics(const std::vector<TrianglePx>& tris,
     return metrics;
 }
 
-// MARK: NDC to pixel space helpers
-
-simd_int2 NDCToPixel(simd_float2 ndc, simd_int2 fb) {
-    return simd_int2((ndc * 0.5f + 0.5f) * fb);
-}
-
-std::vector<TrianglePx> PixelTrianglesFromNDC(const std::vector<simd_float2>& ndcPositions,
-                                              const std::vector<uint32_t>& indicesTri,
-                                              simd_int2 fb) {
-    std::vector<TrianglePx> out;
-    out.reserve(indicesTri.size() / 3);
-    for (size_t i = 0; i + 2 < indicesTri.size(); i += 3) {
-        const simd_int2 p0 = NDCToPixel(ndcPositions[indicesTri[i + 0]], fb);
-        const simd_int2 p1 = NDCToPixel(ndcPositions[indicesTri[i + 1]], fb);
-        const simd_int2 p2 = NDCToPixel(ndcPositions[indicesTri[i + 2]], fb);
-        out.push_back({ p0, p1, p2 });
-    }
-    return out;
-}
-
-} // namespace ttm
+} // namespace TileMetrics

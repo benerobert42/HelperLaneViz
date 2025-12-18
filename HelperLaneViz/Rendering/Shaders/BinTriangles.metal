@@ -5,15 +5,15 @@
 //  Created by Robert Bene on 2025. 11. 12..
 //
 
+#include "../ShaderTypes.h"
+
 #include <metal_stdlib>
 using namespace metal;
 
-struct Vertex { float3 position; };               // matches your CPU Vertex
-struct FrameConstants { float4x4 viewProjectionMatrix; };
 struct BinUniforms {
-    uint2 framebufferPx;   // drawable size
-    uint2 tileSizePx;      // e.g., 32 x 32
-    uint  indexCount;      // total indices
+    uint2 framebufferPx;
+    uint2 tileSizePx;
+    uint  indexCount; // total indices
 };
 
 inline void atomicMax_relaxed(device atomic_uint* addr, uint v) {
@@ -26,18 +26,21 @@ inline void atomicMax_relaxed(device atomic_uint* addr, uint v) {
     }
 }
 
-kernel void binTrianglesToTiles(
-    constant Vertex*      verts      [[ buffer(0) ]],
-    constant uint*        indices    [[ buffer(1) ]],
-    constant FrameConstants& frame   [[ buffer(2) ]],
-    constant BinUniforms& uni        [[ buffer(3) ]],
-    device atomic_uint*   tileCounts [[ buffer(4) ]],
-    device atomic_uint*      maxBuf  [[ buffer(5) ]],
-    uint triId                        [[ thread_position_in_grid ]])
-{
+kernel void binTrianglesToTiles(constant Vertex* verts [[ buffer(0) ]],
+                                constant uint* indices [[ buffer(1) ]],
+                                constant FrameConstants& frame [[ buffer(2) ]],
+                                constant BinUniforms& uni [[ buffer(3) ]],
+                                device atomic_uint* tileCounts [[ buffer(4) ]],
+                                device atomic_uint* maxBuf [[ buffer(5) ]],
+                                uint triId [[ thread_position_in_grid ]]) {
+    if (uni.tileSizePx.x < 16 || uni.tileSizePx.y < 16) {
+        return;
+    }
     // one thread per triangle
-    uint triBase = triId * 3u;
-    if (triBase + 2u >= uni.indexCount) return;
+    uint triBase = triId * 3;
+    if (triBase + 2 >= uni.indexCount) {
+        return;
+    }
 
     uint i0 = indices[triBase + 0];
     uint i1 = indices[triBase + 1];
@@ -53,7 +56,9 @@ kernel void binTrianglesToTiles(
     float4 q2 = frame.viewProjectionMatrix * p2;
 
     // Drop triangles entirely behind the camera
-    if (q0.w <= 0.0 && q1.w <= 0.0 && q2.w <= 0.0) return;
+    if (q0.w <= 0.0 && q1.w <= 0.0 && q2.w <= 0.0) {
+        return;
+    }
 
     float2 ndc0 = q0.xy / max(q0.w, 1e-6);
     float2 ndc1 = q1.xy / max(q1.w, 1e-6);
@@ -70,31 +75,27 @@ kernel void binTrianglesToTiles(
     float2 pmax = ceil (max(px0, max(px1, px2)));
 
     // Convert to tile coords
-    uint2 tile = uint2(max(uni.tileSizePx, uint2(1,1)));
-    uint tilesX = (uni.framebufferPx.x + tile.x - 1u) / tile.x;
-    uint tilesY = (uni.framebufferPx.y + tile.y - 1u) / tile.y;
+    uint2 tile = uni.tileSizePx;
+    uint2 tiles = (uni.framebufferPx + uni.tileSizePx - 1) / tile;
 
-    int tx0 = clamp(int(pmin.x) / int(tile.x), 0, int(tilesX) - 1);
-    int ty0 = clamp(int(pmin.y) / int(tile.y), 0, int(tilesY) - 1);
-    int tx1 = clamp(int(pmax.x) / int(tile.x), 0, int(tilesX) - 1);
-    int ty1 = clamp(int(pmax.y) / int(tile.y), 0, int(tilesY) - 1);
+    uint2 t0 = clamp(uint2(pmin) / tile, 0, tiles - 1);
+    uint2 t1 = clamp(uint2(pmax) / tile, 0, tiles - 1);
 
     // Conservative: mark every tile touched by the triangle’s AABB
-    for (int ty = ty0; ty <= ty1; ++ty) {
-           uint row = uint(ty) * tilesX;
-           for (int tx = tx0; tx <= tx1; ++tx) {
+    for (uint ty = t0.y; ty <= t1.y; ++ty) {
+           uint row = uint(ty) * tiles.x;
+           for (uint tx = t0.x; tx <= t1.x; ++tx) {
                uint idx = row + uint(tx);
                uint old = atomic_fetch_add_explicit(&tileCounts[idx], 1u, memory_order_relaxed);
                uint val = old + 1u;
-               atomicMax_relaxed(maxBuf, val); // <-- track max
+               atomicMax_relaxed(maxBuf, val);
            }
        }
 }
 
 // MARK: - Overdraw Measurement
 
-// Fragment shader for overdraw counting - outputs 1.0 per fragment
-// Used with additive blending to count draws per pixel
+// Outputs 1.0 per fragment, used with additive blending to count draws per pixel
 fragment float overdrawCountFS(float4 position [[position]]) {
     return 1.0;
 }
@@ -102,14 +103,14 @@ fragment float overdrawCountFS(float4 position [[position]]) {
 // Compute shader to sum overdraw texture values
 // Returns: buffer[0] = total pixel draws (overdraw sum)
 //          buffer[1] = unique pixels covered (pixels with value > 0)
-kernel void sumOverdrawTexture(
-    texture2d<float, access::read> overdrawTex [[ texture(0) ]],
-    device atomic_uint* results [[ buffer(0) ]],
-    uint2 tid [[ thread_position_in_grid ]])
-{
+kernel void sumOverdrawTexture(texture2d<float, access::read> overdrawTex [[ texture(0) ]],
+                               device atomic_uint* results [[ buffer(0) ]],
+                               uint2 tid [[ thread_position_in_grid ]]){
     uint2 texSize = uint2(overdrawTex.get_width(), overdrawTex.get_height());
-    if (tid.x >= texSize.x || tid.y >= texSize.y) return;
-    
+    if (tid.x >= texSize.x || tid.y >= texSize.y) {
+        return;
+    }
+
     float value = overdrawTex.read(tid).r;
     uint count = uint(value + 0.5); // Round to nearest integer
     
@@ -121,14 +122,12 @@ kernel void sumOverdrawTexture(
 
 // MARK: - Helper Lane Counting (texture-based, like overdraw)
 
-// Fragment shader that outputs helper lane count per pixel (0-3).
-// Uses same logic as mainFS visualization but outputs count to texture.
-fragment float helperLaneCountFS(
-    float4 position [[position]],
-    texture2d<float> helperTex [[texture(0)]],
-    sampler smp [[sampler(0)]])
-{
-    // Sample texture to engage helper lanes (sample() requires derivatives)
+// Outputs helper lane count per pixel (0-3)
+// Same logic as mainFS visualization but outputs count to texture.
+fragment float helperLaneCountFS(float4 position [[position]],
+                                 texture2d<float> helperTex [[texture(0)]],
+                                 sampler smp [[sampler(0)]]) {
+    // Sample texture to engage helper lanes
     float dummy = helperTex.sample(smp, float2(0.5)).r;
     (void)dummy;
     
@@ -147,14 +146,14 @@ fragment float helperLaneCountFS(
 // Compute shader to sum helper lane texture values
 // Returns: buffer[0] = total helper lane count (sum of all pixels' helper counts)
 //          buffer[1] = unique pixels rendered (pixels with value >= 0)
-kernel void sumHelperLaneTexture(
-    texture2d<float, access::read> helperTex [[ texture(0) ]],
-    device atomic_uint* results [[ buffer(0) ]],
-    uint2 tid [[ thread_position_in_grid ]])
-{
+kernel void sumHelperLaneTexture(texture2d<float, access::read> helperTex [[ texture(0) ]],
+                                 device atomic_uint* results [[ buffer(0) ]],
+                                 uint2 tid [[ thread_position_in_grid ]]) {
     uint2 texSize = uint2(helperTex.get_width(), helperTex.get_height());
-    if (tid.x >= texSize.x || tid.y >= texSize.y) return;
-    
+    if (tid.x >= texSize.x || tid.y >= texSize.y) {
+        return;
+    }
+
     float value = helperTex.read(tid).r;
     
     // Texture cleared to -1; rendered pixels have values 0-3
