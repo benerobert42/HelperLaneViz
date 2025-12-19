@@ -13,9 +13,9 @@
 @class MetricsComputer;
 
 typedef NS_ENUM(NSInteger, VisualizationMode) {
-    VisualizationModeHelperLane,  // Helper lane visualization (default)
-    VisualizationModeWireframe,   // Wireframe with fill mode lines
-    VisualizationModeOverdraw      // Overdraw visualization
+    VisualizationModeHelperLane, // Helper lane visualization (default)
+    VisualizationModeWireframe, // Wireframe with fill mode lines
+    VisualizationModeOverdraw // Overdraw visualization
 };
 
 NS_ASSUME_NONNULL_BEGIN

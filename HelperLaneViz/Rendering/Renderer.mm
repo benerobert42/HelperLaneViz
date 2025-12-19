@@ -121,11 +121,10 @@
     }
     
     // Render UI
-    __weak typeof(self) weakSelf = self;
     [_renderingManager renderUIWithGeometry:_geometryManager
                                      metrics:_metricsComputer
                              onGeometryReload:^(NSString *path, TriangulationMethod method, uint32_t cols, uint32_t rows, float bezierDev) {
-        [_geometryManager loadSVGFromPath:path
+        [self->_geometryManager loadSVGFromPath:path
               triangulationMethod:method
                  instanceGridCols:cols
                          gridRows:rows
