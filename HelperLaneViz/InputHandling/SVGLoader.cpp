@@ -114,40 +114,36 @@ std::vector<SVGLoader::ShapeWithHoles> SVGLoader::ParseSvgToShapes(const std::st
     std::vector<ShapeWithHoles> result;
     
     NSVGimage* image = nsvgParseFromFile(filePath.c_str(), "px", 96.0f);
-    if (!image) return result;
-    
+    if (!image) {
+        return result;
+    }
+
     for (NSVGshape* shape = image->shapes; shape; shape = shape->next) {
-        if ((shape->flags & NSVG_FLAGS_VISIBLE) == 0) continue;
-        
+        if ((shape->flags & NSVG_FLAGS_VISIBLE) == 0) {
+            continue;
+        }
+
         for (NSVGpath* path = shape->paths; path; path = path->next) {
             std::vector<simd_float2> poly = TessellatePath(path, bezierMaxDeviationPx);
-            if (poly.size() < 3) continue;
-            
-            // Check if closed (explicitly or implicitly)
-            bool isClosed = path->closed;
-            if (!isClosed) {
-                float dist = simd_distance(poly.front(), poly.back());
-                // Very generous threshold - if first/last are close, treat as closed
-                if (dist < 50.0f) {
-                    isClosed = true;
-                }
+            if (poly.size() < 3) {
+                continue;
             }
-            
-            if (!isClosed) continue;
 
-            ShapeWithHoles shapeWithHoles;
+            // Check if closed (explicitly or by checking if front and back is close emough)
+            if (!path->closed && simd_distance(poly.front(), poly.back()) > 50.0) {
+                continue;
+            }
 
             if (GetSignedArea(poly) < 0) {
                 std::reverse(poly.begin(), poly.end());
             }
-            shapeWithHoles.outerBoundary = PolyToVertices(poly);
 
+            ShapeWithHoles shapeWithHoles{.outerBoundary = PolyToVertices(poly)};
             result.push_back(std::move(shapeWithHoles));
         }
     }
     
     nsvgDelete(image);
-    
     fprintf(stderr, "SVGLoader: Parsed %zu shapes from %s\n", result.size(), filePath.c_str());
     
     return result;
@@ -170,8 +166,10 @@ bool SVGLoader::TessellateSvgToMesh(const std::string& filePath,
 
     // Helper to triangulate and append a single polygon
     auto triangulateAndAppend = [&](const std::vector<Vertex>& polygon) {
-        if (polygon.size() < 3) return;
-        
+        if (polygon.size() < 3) {
+            return;
+        }
+
         const uint32_t baseIndex = static_cast<uint32_t>(outPositions.size());
         std::vector<uint32_t> indices = triangulator(polygon, true);
         
@@ -215,20 +213,4 @@ bool SVGLoader::TessellateSvgToMesh(const std::string& filePath,
     }
     
     return !outPositions.empty() && !outIndices.empty();
-}
-
-bool SVGLoader::TessellateSvgToMesh(const std::string& filePath,
-                                    std::vector<Vertex>& outPositions,
-                                    std::vector<uint32_t>& outIndices,
-                                    float bezierMaxDeviationPx)
-{
-    // Default: use CDT
-    auto defaultTriangulator = [](const std::vector<Vertex>& verts, bool) {
-        return Triangulation::ConstrainedDelaunayTriangulation(verts);
-    };
-    return TessellateSvgToMesh(filePath,
-                               outPositions,
-                               outIndices,
-                               defaultTriangulator,
-                               bezierMaxDeviationPx);
 }

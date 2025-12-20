@@ -6,6 +6,10 @@
 	objectVersion = 77;
 	objects = {
 
+/* Begin PBXBuildFile section */
+		D05D34872EE763F300AD739A /* GameController.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = D05D34862EE763F300AD739A /* GameController.framework */; };
+/* End PBXBuildFile section */
+
 /* Begin PBXContainerItemProxy section */
 		D0B410B72E50A32F005C8023 /* PBXContainerItemProxy */ = {
 			isa = PBXContainerItemProxy;
@@ -24,6 +28,7 @@
 /* End PBXContainerItemProxy section */
 
 /* Begin PBXFileReference section */
+		D05D34862EE763F300AD739A /* GameController.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = GameController.framework; path = System/Library/Frameworks/GameController.framework; sourceTree = SDKROOT; };
 		D0B410A12E50A32E005C8023 /* HelperLaneViz.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = HelperLaneViz.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		D0B410B62E50A32F005C8023 /* HelperLaneVizTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = HelperLaneVizTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 		D0B410C02E50A32F005C8023 /* HelperLaneVizUITests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = HelperLaneVizUITests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
@@ -52,6 +57,7 @@
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				D05D34872EE763F300AD739A /* GameController.framework in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -72,12 +78,21 @@
 /* End PBXFrameworksBuildPhase section */
 
 /* Begin PBXGroup section */
+		D05D34852EE763F300AD739A /* Frameworks */ = {
+			isa = PBXGroup;
+			children = (
+				D05D34862EE763F300AD739A /* GameController.framework */,
+			);
+			name = Frameworks;
+			sourceTree = "<group>";
+		};
 		D0B410982E50A32E005C8023 = {
 			isa = PBXGroup;
 			children = (
 				D0B410A32E50A32E005C8023 /* HelperLaneViz */,
 				D0B410B92E50A32F005C8023 /* HelperLaneVizTests */,
 				D0B410C32E50A32F005C8023 /* HelperLaneVizUITests */,
+				D05D34852EE763F300AD739A /* Frameworks */,
 				D0B410A22E50A32E005C8023 /* Products */,
 			);
 			sourceTree = "<group>";
@@ -400,6 +415,7 @@
 					"$(SRCROOT)/external/eigen",
 					"$(SRCROOT)/external/triangle",
 					/opt/homebrew/include,
+					"$(SRCROOT)/external/imgui/**",
 				);
 				INFOPLIST_KEY_NSHumanReadableCopyright = "";
 				INFOPLIST_KEY_NSMainStoryboardFile = Main;
@@ -443,6 +459,7 @@
 					"$(SRCROOT)/external/eigen",
 					"$(SRCROOT)/external/triangle",
 					/opt/homebrew/include,
+					"$(SRCROOT)/external/imgui/**",
 				);
 				INFOPLIST_KEY_NSHumanReadableCopyright = "";
 				INFOPLIST_KEY_NSMainStoryboardFile = Main;

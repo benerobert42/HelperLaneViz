@@ -42,7 +42,7 @@ public:
     
     using CompletionCallback = std::function<void(const Results&)>;
     
-    /// Start measuring for a given number of frames
+    // Start measuring for a given number of frames
     void startMeasurement(int frameCount, CompletionCallback callback = nullptr) {
         _targetFrames = frameCount;
         _frameTimes.clear();
@@ -51,8 +51,8 @@ public:
         _callback = callback;
     }
     
-    /// Record GPU execution time (call from command buffer completion handler)
-    /// Returns true if measurement session is complete
+    // Record GPU execution time (call from command buffer completion handler)
+    // Returns true if measurement session is complete
     bool recordGPUEndTime(double gpuStartTime, double gpuEndTime) {
         if (!_isActive) return false;
         
