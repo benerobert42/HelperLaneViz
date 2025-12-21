@@ -12,6 +12,7 @@
 #import "GridOverlay.h"
 #import "TriangulationMetrics.h"
 #import "../ThirdParty/ImGUI/ImGUIHelper.h"
+#import "Measurements/GPUFrameTimer.h"
 
 #import <Metal/Metal.h>
 #import <MetalKit/MetalKit.h>
@@ -43,6 +44,9 @@
     // ImGUI
     ImGUIHelper *_imguiHelper;
     
+    // GPU frame timer
+    GPUFrameTimer *_gpuFrameTimer;
+    
     // Cached metrics for UI display
     uint64_t _lastOverdrawSum;
     double _lastOverdrawRatio;
@@ -51,12 +55,35 @@
     TriangulationMetrics::MeshMetrics _lastMeshMetrics;
     BOOL _hasMeshMetrics;
     
+    // GPU frametime results
+    GPUFrameTimer::Results _lastGPUFrameResults;
+    BOOL _hasGPUFrameResults;
+    
     // UI state for geometry reload
     NSString *_currentSVGPath;
     TriangulationMethod _currentTriangulationMethod;
     float _bezierMaxDeviationPx;
     uint32_t _instanceGridCols;
     uint32_t _instanceGridRows;
+    
+    // Shape type: 0 = SVG, 1 = Ellipse
+    int _shapeType;
+    float _ellipseAxisRatio;
+    int _ellipseVertexCount;
+    
+    // Benchmark state
+    BOOL _benchmarkRunning;
+    int _benchmarkMethodIndex;
+    int _benchmarkPhase;  // 0=reload, 1=compute metrics, 2=record frametime, 3=wait for frametime
+    struct BenchmarkResult {
+        uint64_t helperSum;
+        double helperRatio;
+        double trisPerTileMean, trisPerTileMed, trisPerTileP95;
+        double tilesPerTriMean, tilesPerTriMed, tilesPerTriP95;
+        double frametimeMean, frametimeMed, frametimeDev;
+        size_t triCount;
+    };
+    BenchmarkResult _benchmarkResults[8];  // One per triangulation method
 }
 
 - (instancetype)initWithDevice:(id<MTLDevice>)device view:(MTKView *)view {
@@ -73,9 +100,14 @@
     _lastHelperSum = 0;
     _lastHelperRatio = 0.0;
     _hasMeshMetrics = NO;
+    _hasGPUFrameResults = NO;
     _bezierMaxDeviationPx = 1.0f;
     _instanceGridCols = 5;
     _instanceGridRows = 5;
+    _shapeType = 0;
+    _ellipseAxisRatio = 1.0f;
+    _ellipseVertexCount = 64;
+    _benchmarkRunning = NO;
     
     [self setupPipelines];
     [self setupGridOverlay];
@@ -83,6 +115,9 @@
     
     // Initialize ImGUI
     _imguiHelper = [[ImGUIHelper alloc] initWithDevice:_device view:view];
+    
+    // Initialize GPU frame timer
+    _gpuFrameTimer = new GPUFrameTimer();
     
     return self;
 }
@@ -125,7 +160,8 @@
 
 - (void)renderUIWithGeometry:(GeometryManager *)geometry
                       metrics:(MetricsComputer *)metrics
-              onGeometryReload:(void(^)(NSString *path, TriangulationMethod method, uint32_t cols, uint32_t rows, float bezierDev))reloadBlock {
+              onGeometryReload:(void(^)(NSString *path, TriangulationMethod method, uint32_t cols, uint32_t rows, float bezierDev))reloadBlock
+               onEllipseReload:(void(^)(float axisRatio, int vertexCount, TriangulationMethod method, uint32_t cols, uint32_t rows))ellipseBlock {
     
     MTLRenderPassDescriptor *renderPassDescriptor = _view.currentRenderPassDescriptor;
     if (!renderPassDescriptor) return;
@@ -165,6 +201,29 @@
     ImGui::Separator();
     ImGui::Text("Geometry Settings");
     
+    // Shape Type
+    {
+        const char* shapeTypes[] = { "SVG File", "Ellipse" };
+        if (ImGui::Combo("Shape Type", &_shapeType, shapeTypes, 2)) {
+            if (_shapeType == 0 && _currentSVGPath) {
+                reloadBlock(_currentSVGPath, _currentTriangulationMethod, _instanceGridCols, _instanceGridRows, _bezierMaxDeviationPx);
+            } else if (_shapeType == 1) {
+                ellipseBlock(_ellipseAxisRatio, _ellipseVertexCount, _currentTriangulationMethod, _instanceGridCols, _instanceGridRows);
+            }
+        }
+    }
+    
+    // Ellipse settings (only shown when Ellipse is selected)
+    if (_shapeType == 1) {
+        if (ImGui::SliderFloat("Axis Ratio (minor/major)", &_ellipseAxisRatio, 0.1f, 1.0f, "%.2f")) {
+            ellipseBlock(_ellipseAxisRatio, _ellipseVertexCount, _currentTriangulationMethod, _instanceGridCols, _instanceGridRows);
+        }
+        if (ImGui::InputInt("Vertex Count", &_ellipseVertexCount, 1, 10)) {
+            _ellipseVertexCount = MAX(3, _ellipseVertexCount);
+            ellipseBlock(_ellipseAxisRatio, _ellipseVertexCount, _currentTriangulationMethod, _instanceGridCols, _instanceGridRows);
+        }
+    }
+    
     // Triangulation Method
     {
         const char* triMethods[] = {
@@ -180,8 +239,10 @@
         int currentMethod = (int)_currentTriangulationMethod;
         if (ImGui::Combo("Triangulation Method", &currentMethod, triMethods, 8)) {
             _currentTriangulationMethod = (TriangulationMethod)currentMethod;
-            if (_currentSVGPath) {
+            if (_shapeType == 0 && _currentSVGPath) {
                 reloadBlock(_currentSVGPath, _currentTriangulationMethod, _instanceGridCols, _instanceGridRows, _bezierMaxDeviationPx);
+            } else if (_shapeType == 1) {
+                ellipseBlock(_ellipseAxisRatio, _ellipseVertexCount, _currentTriangulationMethod, _instanceGridCols, _instanceGridRows);
             }
         }
     }
@@ -201,15 +262,19 @@
             _instanceGridRows = (uint32_t)rows;
             gridChanged = true;
         }
-        if (gridChanged && _currentSVGPath) {
-            reloadBlock(_currentSVGPath, _currentTriangulationMethod, _instanceGridCols, _instanceGridRows, _bezierMaxDeviationPx);
+        if (gridChanged) {
+            if (_shapeType == 0 && _currentSVGPath) {
+                reloadBlock(_currentSVGPath, _currentTriangulationMethod, _instanceGridCols, _instanceGridRows, _bezierMaxDeviationPx);
+            } else if (_shapeType == 1) {
+                ellipseBlock(_ellipseAxisRatio, _ellipseVertexCount, _currentTriangulationMethod, _instanceGridCols, _instanceGridRows);
+            }
         }
     }
     
-    // Max Bezier Deviation
-    {
+    // Max Bezier Deviation (only shown for SVG)
+    if (_shapeType == 0) {
         float bezierDev = _bezierMaxDeviationPx;
-        if (ImGui::SliderFloat("Max Bezier Deviation (px)", &bezierDev, 0.1f, 50.0f, "%.1f")) {
+        if (ImGui::SliderFloat("Max Bezier Deviation (px)", &bezierDev, 0.05f, 5.0f, "%.2f")) {
             _bezierMaxDeviationPx = bezierDev;
             if (_currentSVGPath) {
                 reloadBlock(_currentSVGPath, _currentTriangulationMethod, _instanceGridCols, _instanceGridRows, _bezierMaxDeviationPx);
@@ -230,6 +295,24 @@
     }
     ImGui::SameLine();
     ImGui::Text("Total=%llu  Ratio=%.3f", _lastHelperSum, _lastHelperRatio);
+    
+    if (ImGui::Button("Record GPU Frametimes (100 frames)")) {
+        _hasGPUFrameResults = NO;
+        _gpuFrameTimer->startMeasurement(100, [self](const GPUFrameTimer::Results& results) {
+            self->_lastGPUFrameResults = results;
+            self->_hasGPUFrameResults = YES;
+        });
+    }
+    if (_gpuFrameTimer->isActive()) {
+        ImGui::SameLine();
+        ImGui::Text("Recording... %d frames remaining", _gpuFrameTimer->framesRemaining());
+    }
+    if (_hasGPUFrameResults) {
+        ImGui::Text("Mean=%.3f ms  Median=%.3f ms  StdDev=%.3f ms",
+                    _lastGPUFrameResults.avgMs,
+                    _lastGPUFrameResults.p50Ms,
+                    _lastGPUFrameResults.stdDevMs);
+    }
     
     if (ImGui::Button("Compute Tile Stats (CPU)")) {
         const auto& baseVertices = geometry.currentVertices;
@@ -288,7 +371,43 @@
                     _lastMeshMetrics.tilesPerTriangle_Median,
                     _lastMeshMetrics.tilesPerTriangle_P95);
     }
+    
+    ImGui::Separator();
+    if (ImGui::Button("Print Summary for Table")) {
+        printf("TriCount\tHelperSum\tHelperRatio\tTris/Tile Mean\tTris/Tile Med\tTris/Tile P95\tTiles/Tri Mean\tTiles/Tri Med\tTiles/Tri P95\tFrametime Mean\tFrametime Med\tFrametime Dev\n");
+        printf("%zu\t%llu\t%.3f\t%.2f\t%.2f\t%.2f\t%.2f\t%.2f\t%.2f\t%.3f\t%.3f\t%.3f\n",
+               _hasMeshMetrics ? _lastMeshMetrics.triangleCount : 0,
+               _lastHelperSum,
+               _lastHelperRatio,
+               _hasMeshMetrics ? _lastMeshMetrics.trianglesPerTile_Mean : 0.0,
+               _hasMeshMetrics ? _lastMeshMetrics.trianglesPerTile_Median : 0.0,
+               _hasMeshMetrics ? _lastMeshMetrics.trianglesPerTile_P95 : 0.0,
+               _hasMeshMetrics ? _lastMeshMetrics.tilesPerTriangle_Mean : 0.0,
+               _hasMeshMetrics ? _lastMeshMetrics.tilesPerTriangle_Median : 0.0,
+               _hasMeshMetrics ? _lastMeshMetrics.tilesPerTriangle_P95 : 0.0,
+               _hasGPUFrameResults ? _lastGPUFrameResults.avgMs : 0.0,
+               _hasGPUFrameResults ? _lastGPUFrameResults.p50Ms : 0.0,
+               _hasGPUFrameResults ? _lastGPUFrameResults.stdDevMs : 0.0);
+    }
+    
+    // Benchmark all triangulation methods
+    if (!_benchmarkRunning) {
+        if (ImGui::Button("Benchmark All Methods")) {
+            _benchmarkRunning = YES;
+            _benchmarkMethodIndex = 0;
+            _benchmarkPhase = 0;
+            memset(_benchmarkResults, 0, sizeof(_benchmarkResults));
+        }
+    } else {
+        int displayIndex = _benchmarkMethodIndex > 2 ? _benchmarkMethodIndex : _benchmarkMethodIndex + 1;
+        ImGui::Text("Benchmarking method %d/7, phase %d...", displayIndex, _benchmarkPhase);
+    }
     ImGui::End();
+    
+    // Benchmark state machine
+    if (_benchmarkRunning) {
+        [self runBenchmarkStepWithGeometry:geometry metrics:metrics reloadBlock:reloadBlock ellipseBlock:ellipseBlock];
+    }
 }
 
 - (void)renderImGUIWithCommandBuffer:(id<MTLCommandBuffer>)commandBuffer
@@ -396,6 +515,131 @@
     _instanceGridCols = cols;
     _instanceGridRows = rows;
     _bezierMaxDeviationPx = bezierDev;
+}
+
+- (void*)gpuFrameTimer {
+    return _gpuFrameTimer;
+}
+
+- (void)runBenchmarkStepWithGeometry:(GeometryManager *)geometry
+                             metrics:(MetricsComputer *)metrics
+                         reloadBlock:(void(^)(NSString *, TriangulationMethod, uint32_t, uint32_t, float))reloadBlock
+                        ellipseBlock:(void(^)(float, int, TriangulationMethod, uint32_t, uint32_t))ellipseBlock {
+    
+    const char* methodNames[] =
+        {"EarClipping", "MinWeight", "CentroidFan", "GreedyMaxArea", "Strip", "MaxMinArea", "MinMaxArea", "ConstrainedDelaunay"};
+
+    // Skip CentroidFan it modifies vertices which breaks metrics
+    if (_benchmarkMethodIndex == 2) {
+        _benchmarkMethodIndex = 3;
+    }
+    
+    switch (_benchmarkPhase) {
+        case 0: // Reload geometry with current method
+            if (_shapeType == 0 && _currentSVGPath) {
+                reloadBlock(_currentSVGPath,
+                            (TriangulationMethod)_benchmarkMethodIndex,
+                            _instanceGridCols,
+                            _instanceGridRows,
+                            _bezierMaxDeviationPx);
+            } else if (_shapeType == 1) {
+                ellipseBlock(_ellipseAxisRatio,
+                             _ellipseVertexCount,
+                             (TriangulationMethod)_benchmarkMethodIndex,
+                             _instanceGridCols,
+                             _instanceGridRows);
+            }
+            _benchmarkPhase = 1;
+            break;
+            
+        case 1: // Compute helper invocation and tile stats
+        {
+            [metrics computeHelperInvocationMetricsWithGeometry:geometry helperSum:&_lastHelperSum helperRatio:&_lastHelperRatio];
+            
+            const auto& baseVertices = geometry.currentVertices;
+            const auto& baseIndices = geometry.currentIndices;
+            if (!baseVertices.empty() && !baseIndices.empty()) {
+                GridParams gp = geometry.gridParams;
+                const uint32_t cols = gp.cols;
+                const uint32_t rows = gp.rows;
+                const uint32_t instanceCount = cols * rows;
+                
+                std::vector<Vertex> expandedVertices;
+                std::vector<uint32_t> expandedIndices;
+                expandedVertices.reserve(baseVertices.size() * instanceCount);
+                expandedIndices.reserve(baseIndices.size() * instanceCount);
+                
+                for (uint32_t inst = 0; inst < instanceCount; ++inst) {
+                    const uint32_t col = inst % cols;
+                    const uint32_t row = inst / cols;
+                    const simd_float2 cellOrigin = simd_make_float2(col, row) * gp.cellSize + gp.origin;
+                    const uint32_t vertexOffset = (uint32_t)expandedVertices.size();
+                    for (const auto& v : baseVertices) {
+                        Vertex tv;
+                        simd_float2 local = simd_make_float2(v.position.x, v.position.y) * gp.scale;
+                        tv.position = simd_make_float3(cellOrigin.x + local.x, cellOrigin.y + local.y, v.position.z);
+                        expandedVertices.push_back(tv);
+                    }
+                    for (uint32_t idx : baseIndices) {
+                        expandedIndices.push_back(vertexOffset + idx);
+                    }
+                }
+                
+                simd_int2 fb = {(int)_view.drawableSize.width, (int)_view.drawableSize.height};
+                simd_int2 tile = {(int)_tileSizePx, (int)_tileSizePx};
+                _lastMeshMetrics = TriangulationMetrics::ComputeMeshMetrics(expandedVertices, expandedIndices, fb, tile);
+                _hasMeshMetrics = YES;
+            }
+            _benchmarkPhase = 2;
+        }
+            break;
+            
+        case 2: // Start frametime recording
+            _gpuFrameTimer->startMeasurement(300, [self](const GPUFrameTimer::Results& results) {
+                self->_lastGPUFrameResults = results;
+                self->_hasGPUFrameResults = YES;
+            });
+            _benchmarkPhase = 3;
+            break;
+            
+        case 3: // Wait for frametime recording to complete
+            if (!_gpuFrameTimer->isActive()) {
+                // Store results
+                BenchmarkResult& r = _benchmarkResults[_benchmarkMethodIndex];
+                r.helperSum = _lastHelperSum;
+                r.helperRatio = _lastHelperRatio;
+                r.trisPerTileMean = _hasMeshMetrics ? _lastMeshMetrics.trianglesPerTile_Mean : 0;
+                r.trisPerTileMed = _hasMeshMetrics ? _lastMeshMetrics.trianglesPerTile_Median : 0;
+                r.trisPerTileP95 = _hasMeshMetrics ? _lastMeshMetrics.trianglesPerTile_P95 : 0;
+                r.tilesPerTriMean = _hasMeshMetrics ? _lastMeshMetrics.tilesPerTriangle_Mean : 0;
+                r.tilesPerTriMed = _hasMeshMetrics ? _lastMeshMetrics.tilesPerTriangle_Median : 0;
+                r.tilesPerTriP95 = _hasMeshMetrics ? _lastMeshMetrics.tilesPerTriangle_P95 : 0;
+                r.frametimeMean = _hasGPUFrameResults ? _lastGPUFrameResults.avgMs : 0;
+                r.frametimeMed = _hasGPUFrameResults ? _lastGPUFrameResults.p50Ms : 0;
+                r.frametimeDev = _hasGPUFrameResults ? _lastGPUFrameResults.stdDevMs : 0;
+                r.triCount = _hasMeshMetrics ? _lastMeshMetrics.triangleCount : 0;
+                
+                _benchmarkMethodIndex++;
+                if (_benchmarkMethodIndex >= 8) {
+                    // Done - print results
+                    printf("\nMethod\tTriCount\tHelperSum\tHelperRatio\tTris/Tile Mean\tTris/Tile Med\tTris/Tile P95\tTiles/Tri Mean\tTiles/Tri Med\tTiles/Tri P95\tFrametime Mean\tFrametime Med\tFrametime Dev\n");
+                    for (int i = 0; i < 8; i++) {
+                        if (i == 2) continue;  // Skip CentroidFan
+                        BenchmarkResult& br = _benchmarkResults[i];
+                        printf("%s\t%zu\t%llu\t%.3f\t%.2f\t%.2f\t%.2f\t%.2f\t%.2f\t%.2f\t%.3f\t%.3f\t%.3f\n",
+                               methodNames[i], br.triCount, br.helperSum, br.helperRatio,
+                               br.trisPerTileMean, br.trisPerTileMed, br.trisPerTileP95,
+                               br.tilesPerTriMean, br.tilesPerTriMed, br.tilesPerTriP95,
+                               br.frametimeMean, br.frametimeMed, br.frametimeDev);
+                    }
+                    printf("\n");
+                    _benchmarkRunning = NO;
+                } else {
+                    _benchmarkPhase = 0;
+                }
+            }
+            break;
+    }
 }
 
 @end

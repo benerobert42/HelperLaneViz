@@ -37,6 +37,13 @@ NS_ASSUME_NONNULL_BEGIN
                gridRows:(uint32_t)rows
     bezierMaxDeviationPx:(float)bezierMaxDeviationPx;
 
+// Generate ellipse geometry with given axis ratio (minorAxis/majorAxis)
+- (BOOL)generateEllipseWithAxisRatio:(float)axisRatio
+                         vertexCount:(int)vertexCount
+                 triangulationMethod:(TriangulationMethod)method
+                    instanceGridCols:(uint32_t)cols
+                            gridRows:(uint32_t)rows;
+
 // Update viewport size (called when view size changes)
 - (void)updateViewportSize:(vector_uint2)size;
 

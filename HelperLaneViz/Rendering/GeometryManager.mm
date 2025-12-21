@@ -90,6 +90,51 @@
     return YES;
 }
 
+- (BOOL)generateEllipseWithAxisRatio:(float)axisRatio
+                         vertexCount:(int)vertexCount
+                 triangulationMethod:(TriangulationMethod)method
+                    instanceGridCols:(uint32_t)cols
+                            gridRows:(uint32_t)rows {
+    
+    _instanceGridCols = cols;
+    _instanceGridRows = rows;
+    
+    // Generate ellipse vertices (centered at origin, major axis = 1.0)
+    const int segments = MAX(3, vertexCount);
+    const float majorAxis = 1.0f;
+    const float minorAxis = majorAxis * axisRatio;
+    
+    std::vector<Vertex> vertices;
+    vertices.reserve(segments);
+    
+    for (int i = 0; i < segments; ++i) {
+        float angle = (float)i / segments * 2.0f * M_PI;
+        Vertex v;
+        v.position = simd_make_float3(majorAxis * cosf(angle), minorAxis * sinf(angle), 0.0f);
+        vertices.push_back(v);
+    }
+    
+    // Triangulate the ellipse polygon
+    std::vector<uint32_t> indices = [self triangulateVertices:vertices method:method shouldHandleConcave:NO];
+    
+    if (indices.empty()) {
+        NSLog(@"Failed to triangulate ellipse");
+        return NO;
+    }
+    
+    _currentVertices = vertices;
+    _currentIndices = indices;
+    
+    [self uploadVertices:vertices indices:indices];
+    [self setupOrthographicProjection];
+    [self setupInstanceGridWithCols:cols rows:rows];
+    
+    NSLog(@"Generated ellipse (ratio=%.2f, %zu vertices, %zu triangles, method=%ld, grid=%dx%d)",
+          axisRatio, vertices.size(), indices.size() / 3, (long)method, cols, rows);
+    
+    return YES;
+}
+
 - (void)updateViewportSize:(vector_uint2)size {
     _viewportSize = size;
 }

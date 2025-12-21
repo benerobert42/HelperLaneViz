@@ -26,7 +26,8 @@ NS_ASSUME_NONNULL_BEGIN
 
 - (void)renderUIWithGeometry:(GeometryManager *)geometry
                      metrics:(MetricsComputer *)metrics
-            onGeometryReload:(void(^)(NSString *path, TriangulationMethod method, uint32_t cols, uint32_t rows, float bezierDev))reloadBlock;
+            onGeometryReload:(void(^)(NSString *path, TriangulationMethod method, uint32_t cols, uint32_t rows, float bezierDev))reloadBlock
+             onEllipseReload:(void(^)(float axisRatio, int vertexCount, TriangulationMethod method, uint32_t cols, uint32_t rows))ellipseBlock;
 
 // Encode geometry rendering for specified visualization mode
 - (void)encodeGeometryWithEncoder:(id<MTLRenderCommandEncoder>)encoder
@@ -52,6 +53,8 @@ NS_ASSUME_NONNULL_BEGIN
                       cols:(uint32_t)cols
                       rows:(uint32_t)rows
           bezierDeviation:(float)bezierDev;
+
+- (void*)gpuFrameTimer;  // Returns GPUFrameTimer* (void* for Obj-C compatibility)
 
 @end
 

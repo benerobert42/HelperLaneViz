@@ -9,6 +9,7 @@
 #import "GeometryManager.h"
 #import "MetricsComputer.h"
 #import "RenderingManager.h"
+#import "Measurements/GPUFrameTimer.h"
 
 #import <MetalKit/MetalKit.h>
 
@@ -129,6 +130,13 @@
                  instanceGridCols:cols
                          gridRows:rows
             bezierMaxDeviationPx:bezierDev];
+    }
+                              onEllipseReload:^(float axisRatio, int vertexCount, TriangulationMethod method, uint32_t cols, uint32_t rows) {
+        [self->_geometryManager generateEllipseWithAxisRatio:axisRatio
+                                                 vertexCount:vertexCount
+                                         triangulationMethod:method
+                                            instanceGridCols:cols
+                                                    gridRows:rows];
     }];
     
     id<MTLRenderCommandEncoder> encoder = [commandBuffer renderCommandEncoderWithDescriptor:renderPassDescriptor];
@@ -148,6 +156,15 @@
 
     [encoder endEncoding];
     [commandBuffer presentDrawable:view.currentDrawable];
+    
+    // Record GPU frame time (actual GPU execution: GPUEndTime - GPUStartTime)
+    GPUFrameTimer *gpuFrameTimer = (GPUFrameTimer *)[_renderingManager gpuFrameTimer];
+    if (gpuFrameTimer && gpuFrameTimer->isActive()) {
+        [commandBuffer addCompletedHandler:^(id<MTLCommandBuffer> buffer) {
+            gpuFrameTimer->recordGPUEndTime(buffer.GPUStartTime, buffer.GPUEndTime);
+        }];
+    }
+    
     [commandBuffer commit];
 }
 

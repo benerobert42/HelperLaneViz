@@ -13,7 +13,7 @@
 
 namespace TriangulationMetrics {
 
-/// Summary of tile-based rendering metrics for a triangulated mesh.
+// Summary of tile-based rendering metrics for a triangulated mesh.
 struct MeshMetrics {
     // Edge metrics
     size_t uniqueEdgeCount = 0;

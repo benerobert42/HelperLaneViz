@@ -178,12 +178,9 @@ bool SVGLoader::TessellateSvgToMesh(const std::string& filePath,
             return;
         }
         
-        // Append vertices
         for (const auto& v : polygon) {
             outPositions.push_back(v);
         }
-        
-        // Append indices (offset by base)
         for (uint32_t idx : indices) {
             outIndices.push_back(baseIndex + idx);
         }
