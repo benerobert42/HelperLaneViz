@@ -13,6 +13,7 @@
 
 #include <Eigen/Core>
 #include <igl/triangle/triangulate.h>
+#include "triangulator.h"
 
 namespace Triangulation {
 
@@ -74,6 +75,263 @@ std::vector<uint32_t> EarClippingTriangulation(const std::vector<Vertex>& vertic
         indices.push_back(polygon[2]);
     }
 
+    return indices;
+}
+
+std::vector<uint32_t> EarClippingTriangulation_MinDiagonalPQ(const std::vector<Vertex>& vertices) {
+    std::vector<uint32_t> indices;
+    const uint32_t n = static_cast<uint32_t>(vertices.size());
+    if (n < 3)
+    {
+        return indices;
+    }
+
+    const bool isCCW = Helpers::PolygonSignedArea(vertices) >= 0.0;
+
+    // Doubly-linked list on top of the polygon index list
+    std::vector<uint32_t> polygon(n);
+    std::iota(polygon.begin(), polygon.end(), 0);
+
+    std::vector<int> prev(n);
+    std::vector<int> next(n);
+    std::vector<bool> alive(n, true);
+
+    for (uint32_t i = 0; i < n; ++i) {
+        prev[i] = (i - 1 + n) % n;
+        next[i] = (i + 1) % n;
+    }
+
+    uint32_t remaining = n;
+
+    // Versioning for lazy PQ invalidation: bump when a vertex's ear candidate must be recomputed
+    std::vector<uint32_t> version(n, 0);
+
+    struct EarCandidate {
+        double score;       // lower is better
+        int i;              // vertex in linked list (index into [0..n))
+        uint32_t version;   // version at insertion time
+    };
+    struct EarCandidateGreater {
+        bool operator()(const EarCandidate& a, const EarCandidate& b) const {
+            return a.score > b.score; // min-heap
+        }
+    };
+
+    std::priority_queue<EarCandidate, std::vector<EarCandidate>, EarCandidateGreater> pq;
+
+    // Builds a small "polygon list" view for IsValidEar:
+    // it expects a list of remaining vertex indices in order.
+    // To keep diff minimal, we rebuild it only for the ear check (local cost),
+    // BUT doing this would destroy performance.
+    //
+    // So instead: we create ONE ordered polygon list (initially [0..n-1]) and maintain it
+    // via alive/prev/next, and we provide IsValidEar with that list plus indices.
+    //
+    // Your Helpers::IsValidEar signature is:
+    // IsValidEar(vertices, polygon, prevIndexInPolygonArray, iIndexInPolygonArray, nextIndexInPolygonArray, isCCW)
+    //
+    // That API uses "indices into polygon array", not vertex ids.
+    // For min diff, we keep a mapping from "current linked-list vertex" -> its position in
+    // a dynamically rebuilt polygon array when needed.
+    //
+    // HOWEVER: rebuilding that array every time kills the PQ benefit.
+    //
+    // So: we assume (as in your current code) that IsValidEar needs the actual ordered list.
+    // The best minimal-diff path is: keep an ordered vector of the current polygon and
+    // update it with erase (like you do). But then PQ can’t work.
+    //
+    // Therefore, below we implement a small adapter: we maintain a current ordered polygon
+    // vector AND a position map, and we update them incrementally when clipping an ear.
+    // This keeps diff small and makes PQ viable.
+
+    std::vector<uint32_t> poly = polygon;          // ordered list of vertex ids
+    std::vector<int> pos(n);                       // vertex id -> position in poly
+    for (int k = 0; k < n; ++k) pos[poly[k]] = k;
+
+    auto pushIfEar = [&](uint32_t v) {
+        if (!alive[v]) return;
+
+        // Refresh version
+        ++version[v];
+
+        // Need current positions in poly
+        const int pi = pos[v];
+        if (pi < 0) return;
+
+        const int sz = static_cast<int>(poly.size());
+        if (sz < 3) return;
+
+        const int ppos = (pi - 1 + sz) % sz;
+        const int npos = (pi + 1) % sz;
+
+        if (!Helpers::IsValidEar(vertices, poly,
+                                static_cast<size_t>(ppos),
+                                static_cast<size_t>(pi),
+                                static_cast<size_t>(npos),
+                                isCCW)) {
+            return;
+        }
+
+        const uint32_t pv = poly[ppos];
+        const uint32_t nv = poly[npos];
+
+        // Objective: minimize diagonal (prev-next). Use squared or actual?
+        // Use squared length if your Helpers doesn't expose squared; otherwise EdgeLength is fine.
+        const double score = Helpers::EdgeLength(vertices[pv], vertices[nv]);
+
+        pq.push(EarCandidate{score, static_cast<int>(v), version[v]});
+    };
+
+    // Initialize heap with all ears
+    for (uint32_t v = 0; v < n; ++v) {
+        pushIfEar(v);
+    }
+
+    indices.reserve((n - 2) * 3);
+
+    auto eraseFromPoly = [&](int removePos) {
+        const uint32_t v = poly[removePos];
+
+        // erase from ordered vector
+        poly.erase(poly.begin() + removePos);
+
+        // update positions for elements after removePos
+        for (int k = removePos; k < static_cast<int>(poly.size()); ++k) {
+            pos[poly[k]] = k;
+        }
+        pos[v] = -1;
+    };
+
+    while (remaining > 3) {
+        bool found = false;
+        uint32_t earV = 0;
+
+        while (!pq.empty()) {
+            const EarCandidate cand = pq.top();
+            pq.pop();
+
+            const uint32_t v = static_cast<uint32_t>(cand.i);
+            if (v >= n || !alive[v]) continue;
+            if (cand.version != version[v]) continue; // stale heap entry
+
+            // Re-validate because neighborhood could have changed
+            const int pi = pos[v];
+            if (pi < 0) continue;
+
+            const int sz = static_cast<int>(poly.size());
+            const int ppos = (pi - 1 + sz) % sz;
+            const int npos = (pi + 1) % sz;
+
+            if (!Helpers::IsValidEar(vertices, poly,
+                                    static_cast<size_t>(ppos),
+                                    static_cast<size_t>(pi),
+                                    static_cast<size_t>(npos),
+                                    isCCW)) {
+                // it might become an ear later; refresh it now
+                pushIfEar(v);
+                continue;
+            }
+
+            earV = v;
+            found = true;
+            break;
+        }
+
+        if (!found) {
+            // fallback: behave like your original code (avoid total failure)
+            bool earFound = false;
+            const size_t sz = poly.size();
+            for (size_t i = 0; i < sz; ++i) {
+                const size_t p = (i + sz - 1) % sz;
+                const size_t q = (i + 1) % sz;
+                if (Helpers::IsValidEar(vertices, poly, p, i, q, isCCW)) {
+                    indices.push_back(poly[p]);
+                    indices.push_back(poly[i]);
+                    indices.push_back(poly[q]);
+
+                    alive[poly[i]] = false;
+                    eraseFromPoly(static_cast<int>(i));
+                    --remaining;
+
+                    // neighbors changed
+                    if (poly.size() >= 3) {
+                        const int newSz = static_cast<int>(poly.size());
+                        const int leftPos  = (static_cast<int>(i) - 1 + newSz) % newSz;
+                        const int rightPos = static_cast<int>(i) % newSz;
+                        pushIfEar(poly[leftPos]);
+                        pushIfEar(poly[rightPos]);
+                    }
+                    earFound = true;
+                    break;
+                }
+            }
+            if (!earFound) break;
+            continue;
+        }
+
+        // Clip chosen ear
+        const int pi = pos[earV];
+        const int sz = static_cast<int>(poly.size());
+        const int ppos = (pi - 1 + sz) % sz;
+        const int npos = (pi + 1) % sz;
+
+        const uint32_t pv = poly[ppos];
+        const uint32_t v  = poly[pi];
+        const uint32_t nv = poly[npos];
+
+        indices.push_back(pv);
+        indices.push_back(v);
+        indices.push_back(nv);
+
+        alive[v] = false;
+
+        // Remove v from the ordered polygon
+        eraseFromPoly(pi);
+        --remaining;
+
+        // Only neighbors can change ear status: pv and nv (now adjacent)
+        if (poly.size() >= 3) {
+            pushIfEar(pv);
+            pushIfEar(nv);
+        }
+    }
+
+    if (poly.size() == 3) {
+        indices.push_back(poly[0]);
+        indices.push_back(poly[1]);
+        indices.push_back(poly[2]);
+    }
+
+    return indices;
+}
+
+std::vector<uint32_t> EarClippingTriangulation_Triangulator(const std::vector<Vertex>& vertices) {
+    std::vector<uint32_t> indices;
+    const size_t n = vertices.size();
+    
+    if (n < 3) {
+        return indices;
+    }
+    
+    // Convert Vertex format to Triangulator format (2D points)
+    std::vector<std::array<double, 2>> contour;
+    contour.reserve(n);
+    for (const auto& v : vertices) {
+        contour.push_back({static_cast<double>(v.position.x), static_cast<double>(v.position.y)});
+    }
+    
+    // Call Triangulator's ear clipping (delaunay=false for pure ear clipping)
+    Triangulator::Diagnostics diagnostics;
+    auto triangles = Triangulator::triangulate1(contour, diagnostics, false, true);
+    
+    // Convert output format: std::vector<std::array<std::size_t,3>> -> std::vector<uint32_t>
+    indices.reserve(triangles.size() * 3);
+    for (const auto& tri : triangles) {
+        indices.push_back(static_cast<uint32_t>(tri[0]));
+        indices.push_back(static_cast<uint32_t>(tri[1]));
+        indices.push_back(static_cast<uint32_t>(tri[2]));
+    }
+    
     return indices;
 }
 

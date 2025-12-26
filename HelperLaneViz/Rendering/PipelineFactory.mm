@@ -12,6 +12,7 @@ static inline MTLRenderPipelineDescriptor *CommonPipelineDescriptor(MTKView *vie
     d.colorAttachments[0].pixelFormat = view.colorPixelFormat;
     d.depthAttachmentPixelFormat = MTLPixelFormatInvalid;
     d.stencilAttachmentPixelFormat = MTLPixelFormatInvalid;
+    d.rasterSampleCount = view.sampleCount;
     return d;
 }
 

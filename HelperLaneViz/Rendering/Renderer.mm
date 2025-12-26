@@ -36,6 +36,12 @@
     _view = mtkView;
     _commandQueue = [_device newCommandQueue];
     
+    // Set initial MSAA (must be before RenderingManager so pipelines match)
+    NSInteger initialSampleCount = 2;
+    if ([_device supportsTextureSampleCount:initialSampleCount]) {
+        _view.sampleCount = initialSampleCount;
+    }
+    
     // Initialize managers
     _geometryManager = [[GeometryManager alloc] initWithDevice:_device];
     _metricsComputer = [[MetricsComputer alloc] initWithDevice:_device commandQueue:_commandQueue];
@@ -48,9 +54,10 @@
     // Setup view (no depth buffer needed for 2D visualization)
     _view.clearColor = MTLClearColorMake(0, 0, 0, 1);
     _view.depthStencilPixelFormat = MTLPixelFormatInvalid;
+
     
     // Load default SVG (can be removed or made configurable)
-    NSString *defaultSVGPath = @"/Users/robi/Downloads/146024.svg";
+    NSString *defaultSVGPath = @"/Users/robi/Downloads/1920560.svg";
     [self loadSVGFromPath:defaultSVGPath
       triangulationMethod:TriangulationMethodMinimumWeight
          instanceGridCols:5
@@ -114,15 +121,9 @@
 
 - (void)drawInMTKView:(MTKView *)view {
     id<MTLCommandBuffer> commandBuffer = [_commandQueue commandBuffer];
-
-    MTLRenderPassDescriptor *renderPassDescriptor = view.currentRenderPassDescriptor;
-    if (!renderPassDescriptor) {
-        [commandBuffer commit];
-        return;
-    }
     
-    // Render UI
-    [_renderingManager renderUIWithGeometry:_geometryManager
+    // Render UI (may return NO to skip frame, e.g. on MSAA change)
+    BOOL shouldRender = [_renderingManager renderUIWithGeometry:_geometryManager
                                      metrics:_metricsComputer
                              onGeometryReload:^(NSString *path, TriangulationMethod method, uint32_t cols, uint32_t rows, float bezierDev) {
         [self->_geometryManager loadSVGFromPath:path
@@ -138,6 +139,17 @@
                                             instanceGridCols:cols
                                                     gridRows:rows];
     }];
+    
+    if (!shouldRender) {
+        [commandBuffer commit];
+        return;
+    }
+    
+    MTLRenderPassDescriptor *renderPassDescriptor = view.currentRenderPassDescriptor;
+    if (!renderPassDescriptor) {
+        [commandBuffer commit];
+        return;
+    }
     
     id<MTLRenderCommandEncoder> encoder = [commandBuffer renderCommandEncoderWithDescriptor:renderPassDescriptor];
 

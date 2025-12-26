@@ -22,6 +22,8 @@ double calculateTotalEdgeLength(const std::vector<Vertex>& vertices,
 
 // Simple algorithms without specific optimisation target
 std::vector<uint32_t> EarClippingTriangulation(const std::vector<Vertex>& vertices);
+std::vector<uint32_t> EarClippingTriangulation_MinDiagonalPQ(const std::vector<Vertex>& vertices);
+std::vector<uint32_t> EarClippingTriangulation_Triangulator(const std::vector<Vertex>& vertices);
 std::vector<uint32_t> CentroidFanTriangulation(std::vector<Vertex>& vertices);
 std::vector<uint32_t> StripTriangulation(const std::vector<Vertex>& vertices);
 

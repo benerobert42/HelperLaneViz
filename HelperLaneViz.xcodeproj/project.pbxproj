@@ -414,6 +414,7 @@
 					"$(SRCROOT)/external/libigl/include",
 					"$(SRCROOT)/external/eigen",
 					"$(SRCROOT)/external/triangle",
+					"$(SRCROOT)/external/triangulator/include",
 					/opt/homebrew/include,
 					"$(SRCROOT)/external/imgui/**",
 				);
@@ -458,6 +459,7 @@
 					"$(SRCROOT)/external/libigl/include",
 					"$(SRCROOT)/external/eigen",
 					"$(SRCROOT)/external/triangle",
+					"$(SRCROOT)/external/triangulator/include",
 					/opt/homebrew/include,
 					"$(SRCROOT)/external/imgui/**",
 				);

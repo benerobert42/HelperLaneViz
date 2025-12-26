@@ -36,6 +36,8 @@
     VisualizationMode _visualizationMode;
     uint32_t _tileSizePx;
     BOOL _showGridOverlay;
+    int _msaaSampleCount;  // 1, 2, or 4
+    int _pendingMSAASampleCount;  // 0 = no pending change
     
     // Helper lane engagement
     id<MTLTexture> _helperLaneTexture;
@@ -74,7 +76,8 @@
     // Benchmark state
     BOOL _benchmarkRunning;
     int _benchmarkMethodIndex;
-    int _benchmarkPhase;  // 0=reload, 1=compute metrics, 2=record frametime, 3=wait for frametime
+    int _benchmarkPhase;  // 0=reload, 1=compute metrics, 2=delay, 3=record frametime, 4=wait for frametime
+    int _benchmarkDelayFrames;
     struct BenchmarkResult {
         uint64_t helperSum;
         double helperRatio;
@@ -95,6 +98,8 @@
     _visualizationMode = VisualizationModeHelperLane;
     _tileSizePx = 32;
     _showGridOverlay = YES;
+    _msaaSampleCount = (int)_view.sampleCount;  // Read initial value from view
+    _pendingMSAASampleCount = 0;
     _lastOverdrawSum = 0;
     _lastOverdrawRatio = 0.0;
     _lastHelperSum = 0;
@@ -158,13 +163,23 @@
 
 // MARK: - Public Interface
 
-- (void)renderUIWithGeometry:(GeometryManager *)geometry
+- (BOOL)renderUIWithGeometry:(GeometryManager *)geometry
                       metrics:(MetricsComputer *)metrics
               onGeometryReload:(void(^)(NSString *path, TriangulationMethod method, uint32_t cols, uint32_t rows, float bezierDev))reloadBlock
                onEllipseReload:(void(^)(float axisRatio, int vertexCount, TriangulationMethod method, uint32_t cols, uint32_t rows))ellipseBlock {
     
+    // Apply pending MSAA change at frame start - skip this frame to let drawable update
+    if (_pendingMSAASampleCount > 0) {
+        _msaaSampleCount = _pendingMSAASampleCount;
+        _view.sampleCount = _msaaSampleCount;
+        [self setupPipelines];
+        [self setupGridOverlay];  // GridOverlay holds pipeline reference, needs update
+        _pendingMSAASampleCount = 0;
+        return NO;  // Skip rendering - current drawable has old sample count
+    }
+    
     MTLRenderPassDescriptor *renderPassDescriptor = _view.currentRenderPassDescriptor;
-    if (!renderPassDescriptor) return;
+    if (!renderPassDescriptor) return YES;
     
     // Start ImGUI frame
     [_imguiHelper newFrameWithRenderPassDescriptor:renderPassDescriptor];
@@ -198,6 +213,18 @@
         }
     }
     
+    // MSAA
+    {
+        int msaaIndex = (_msaaSampleCount == 1) ? 0 : ((_msaaSampleCount == 2) ? 1 : 2);
+        const char* msaaOptions[] = { "Off", "2x", "4x" };
+        if (ImGui::Combo("MSAA", &msaaIndex, msaaOptions, 3)) {
+            int newSampleCount = (msaaIndex == 0) ? 1 : ((msaaIndex == 1) ? 2 : 4);
+            if (newSampleCount != _msaaSampleCount) {
+                _pendingMSAASampleCount = newSampleCount;  // Apply next frame
+            }
+        }
+    }
+    
     ImGui::Separator();
     ImGui::Text("Geometry Settings");
     
@@ -228,6 +255,8 @@
     {
         const char* triMethods[] = {
             "Ear Clipping",
+            "Ear Clipping (Min Diagonal PQ)",
+            "Ear Clipping (Triangulator)",
             "Minimum Weight",
             "Centroid Fan",
             "Greedy Max Area",
@@ -237,7 +266,7 @@
             "Constrained Delaunay"
         };
         int currentMethod = (int)_currentTriangulationMethod;
-        if (ImGui::Combo("Triangulation Method", &currentMethod, triMethods, 8)) {
+        if (ImGui::Combo("Triangulation Method", &currentMethod, triMethods, 10)) {
             _currentTriangulationMethod = (TriangulationMethod)currentMethod;
             if (_shapeType == 0 && _currentSVGPath) {
                 reloadBlock(_currentSVGPath, _currentTriangulationMethod, _instanceGridCols, _instanceGridRows, _bezierMaxDeviationPx);
@@ -408,6 +437,8 @@
     if (_benchmarkRunning) {
         [self runBenchmarkStepWithGeometry:geometry metrics:metrics reloadBlock:reloadBlock ellipseBlock:ellipseBlock];
     }
+    
+    return YES;
 }
 
 - (void)renderImGUIWithCommandBuffer:(id<MTLCommandBuffer>)commandBuffer
@@ -491,6 +522,10 @@
 
 - (VisualizationMode)visualizationMode {
     return _visualizationMode;
+}
+
+- (int)msaaSampleCount {
+    return _msaaSampleCount;
 }
 
 - (void)setVisualizationMode:(VisualizationMode)mode {
@@ -590,19 +625,26 @@
                 _lastMeshMetrics = TriangulationMetrics::ComputeMeshMetrics(expandedVertices, expandedIndices, fb, tile);
                 _hasMeshMetrics = YES;
             }
+            _benchmarkDelayFrames = 50;
             _benchmarkPhase = 2;
         }
             break;
             
-        case 2: // Start frametime recording
+        case 2: // Delay frames to let GPU settle after geometry change
+            if (--_benchmarkDelayFrames <= 0) {
+                _benchmarkPhase = 3;
+            }
+            break;
+            
+        case 3: // Start frametime recording
             _gpuFrameTimer->startMeasurement(300, [self](const GPUFrameTimer::Results& results) {
                 self->_lastGPUFrameResults = results;
                 self->_hasGPUFrameResults = YES;
             });
-            _benchmarkPhase = 3;
+            _benchmarkPhase = 4;
             break;
             
-        case 3: // Wait for frametime recording to complete
+        case 4: // Wait for frametime recording to complete
             if (!_gpuFrameTimer->isActive()) {
                 // Store results
                 BenchmarkResult& r = _benchmarkResults[_benchmarkMethodIndex];

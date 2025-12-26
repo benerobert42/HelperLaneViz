@@ -24,7 +24,8 @@ NS_ASSUME_NONNULL_BEGIN
 
 - (instancetype)initWithDevice:(id<MTLDevice>)device view:(MTKView *)view;
 
-- (void)renderUIWithGeometry:(GeometryManager *)geometry
+// Returns NO if frame should be skipped (e.g., MSAA change pending)
+- (BOOL)renderUIWithGeometry:(GeometryManager *)geometry
                      metrics:(MetricsComputer *)metrics
             onGeometryReload:(void(^)(NSString *path, TriangulationMethod method, uint32_t cols, uint32_t rows, float bezierDev))reloadBlock
              onEllipseReload:(void(^)(float axisRatio, int vertexCount, TriangulationMethod method, uint32_t cols, uint32_t rows))ellipseBlock;
@@ -45,6 +46,7 @@ NS_ASSUME_NONNULL_BEGIN
 - (void)setShowGridOverlay:(BOOL)show;
 - (VisualizationMode)visualizationMode;
 - (void)setVisualizationMode:(VisualizationMode)mode;
+- (int)msaaSampleCount;
 - (uint32_t)tileSizePx;
 - (void)setTileSizePx:(uint32_t)tileSize;
 

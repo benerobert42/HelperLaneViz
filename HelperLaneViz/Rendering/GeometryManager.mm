@@ -188,6 +188,14 @@
             indices = Triangulation::EarClippingTriangulation(mutableVerts);
             break;
             
+        case TriangulationMethodEarClippingMinDiagonalPQ:
+            indices = Triangulation::EarClippingTriangulation_MinDiagonalPQ(mutableVerts);
+            break;
+            
+        case TriangulationMethodEarClippingTriangulator:
+            indices = Triangulation::EarClippingTriangulation_Triangulator(mutableVerts);
+            break;
+            
         case TriangulationMethodMinimumWeight:
             indices = Triangulation::MinimumWeightTriangulation(mutableVerts, shouldHandleConcave);
             break;
