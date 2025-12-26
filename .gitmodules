@@ -7,3 +7,6 @@
 [submodule "external/imgui"]
 	path = external/imgui
 	url = https://github.com/ocornut/imgui.git
+[submodule "HelperLaneViz/ThirdParty/Triangulator"]
+	path = HelperLaneViz/ThirdParty/Triangulator
+	url = https://github.com/scline6/Triangulator.git

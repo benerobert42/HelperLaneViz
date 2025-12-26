@@ -10,6 +10,8 @@
 #include "TriangulationHelpers.h"
 
 #include <numeric>
+#include <limits>
+#include <cmath>
 
 #include <Eigen/Core>
 #include <igl/triangle/triangulate.h>
@@ -27,57 +29,6 @@ double CalculateTotalEdgeLength(const std::vector<Vertex>& vertices,
 }
 
 // MARK: Simple triangulations
-std::vector<uint32_t> EarClippingTriangulation(const std::vector<Vertex>& vertices) {
-    std::vector<uint32_t> indices;
-    const size_t n = vertices.size();
-
-    if (n < 3) return indices;
-
-    const bool isCCW = Helpers::PolygonSignedArea(vertices) >= 0.0;
-
-    // Working list of remaining vertex indices
-    std::vector<uint32_t> polygon(n);
-    std::iota(polygon.begin(), polygon.end(), 0);
-
-    indices.reserve((n - 2) * 3);
-
-    // Clip ears until only 3 vertices remain
-    while (polygon.size() > 3) {
-        const size_t size = polygon.size();
-        bool earFound = false;
-
-        for (size_t i = 0; i < size; ++i) {
-            const size_t prev = (i + size - 1) % size;
-            const size_t next = (i + 1) % size;
-
-            if (Helpers::IsValidEar(vertices, polygon, prev, i, next, isCCW)) {
-                // Emit triangle
-                indices.push_back(polygon[prev]);
-                indices.push_back(polygon[i]);
-                indices.push_back(polygon[next]);
-
-                // Remove the ear vertex
-                polygon.erase(polygon.begin() + static_cast<ptrdiff_t>(i));
-                earFound = true;
-                break;
-            }
-        }
-
-        if (!earFound) {
-            break;
-        }
-    }
-
-    // Add final triangle
-    if (polygon.size() == 3) {
-        indices.push_back(polygon[0]);
-        indices.push_back(polygon[1]);
-        indices.push_back(polygon[2]);
-    }
-
-    return indices;
-}
-
 std::vector<uint32_t> EarClippingTriangulation_MinDiagonalPQ(const std::vector<Vertex>& vertices) {
     std::vector<uint32_t> indices;
     const uint32_t n = static_cast<uint32_t>(vertices.size());
@@ -305,33 +256,239 @@ std::vector<uint32_t> EarClippingTriangulation_MinDiagonalPQ(const std::vector<V
     return indices;
 }
 
+static inline double Orient2D(const Vertex& a, const Vertex& b, const Vertex& c) {
+    const double ax = a.position.x, ay = a.position.y;
+    const double bx = b.position.x, by = b.position.y;
+    const double cx = c.position.x, cy = c.position.y;
+    return (bx-ax)*(cy-ay) - (by-ay)*(cx-ax);
+}
+
+static inline double Len2(const Vertex& a, const Vertex& b) {
+    const double dx = double(a.position.x) - double(b.position.x);
+    const double dy = double(a.position.y) - double(b.position.y);
+    return dx*dx + dy*dy;
+}
+
+static inline bool IsConvexQuad(const std::vector<Vertex>& V,
+                                uint32_t a, uint32_t b, uint32_t c, uint32_t d) {
+    // a and b must be on opposite sides of cd, and c and d opposite sides of ab
+    const double o1 = Orient2D(V[a], V[b], V[c]);
+    const double o2 = Orient2D(V[a], V[b], V[d]);
+    if (o1 == 0.0 || o2 == 0.0 || ((o1 > 0) == (o2 > 0))) return false;
+
+    const double o3 = Orient2D(V[c], V[d], V[a]);
+    const double o4 = Orient2D(V[c], V[d], V[b]);
+    if (o3 == 0.0 || o4 == 0.0 || ((o3 > 0) == (o4 > 0))) return false;
+
+    return true;
+}
+
+struct EdgeKey {
+    uint32_t a, b; // a<b
+    bool operator==(const EdgeKey& o) const { return a==o.a && b==o.b; }
+};
+struct EdgeKeyHash {
+    size_t operator()(const EdgeKey& k) const noexcept {
+        return (size_t)k.a * 73856093u ^ (size_t)k.b * 19349663u;
+    }
+};
+struct EdgeAdj {
+    int t0 = -1, t1 = -1;
+    uint32_t opp0 = 0, opp1 = 0;
+};
+
+static inline std::array<uint32_t,3> MakeCCW(const std::vector<Vertex>& V,
+                                             uint32_t x, uint32_t y, uint32_t z) {
+    if (Orient2D(V[x], V[y], V[z]) > 0.0) return {x,y,z};
+    return {x,z,y};
+}
+
+// --- Add this function in namespace Triangulation ---
+
+std::vector<uint32_t> OptimizeByMinLengthFlips(const std::vector<Vertex>& vertices,
+                                               std::vector<uint32_t> indices)
+{
+    const int triCount = int(indices.size() / 3);
+    if (triCount <= 0) {
+        return indices;
+    }
+
+    auto tri = [&](int t, int k) -> uint32_t& { return indices[3*t + k]; };
+    auto tric = [&](int t, int k) -> uint32_t  { return indices[3*t + k]; };
+
+    std::unordered_map<EdgeKey, EdgeAdj, EdgeKeyHash> adj;
+    adj.reserve(indices.size() * 2);
+
+    auto addEdge = [&](uint32_t u, uint32_t v, int t, uint32_t opp) {
+        EdgeKey key{std::min(u,v), std::max(u,v)};
+        auto& e = adj[key];
+        if (e.t0 == -1) {
+            e.t0 = t;
+            e.opp0 = opp;
+        }
+        else {
+            e.t1 = t;
+            e.opp1 = opp;
+        }
+    };
+
+    auto rebuildTriangle = [&](int t) {
+        const uint32_t a = tric(t,0), b = tric(t,1), c = tric(t,2);
+        addEdge(a,b,t,c);
+        addEdge(b,c,t,a);
+        addEdge(c,a,t,b);
+    };
+
+    auto clearTriangle = [&](int t) {
+        const uint32_t a = tric(t,0), b = tric(t,1), c = tric(t,2);
+        EdgeKey e0{std::min(a,b), std::max(a,b)};
+        EdgeKey e1{std::min(b,c), std::max(b,c)};
+        EdgeKey e2{std::min(c,a), std::max(c,a)};
+
+        auto clearOne = [&](const EdgeKey& k) {
+            auto it = adj.find(k);
+            if (it == adj.end()) return;
+            auto& E = it->second;
+            if (E.t0 == t) { E.t0 = -1; E.opp0 = 0; }
+            if (E.t1 == t) { E.t1 = -1; E.opp1 = 0; }
+        };
+
+        clearOne(e0); clearOne(e1); clearOne(e2);
+    };
+
+    for (int t = 0; t < triCount; ++t) rebuildTriangle(t);
+
+    std::queue<EdgeKey> q;
+    for (auto& [k, e] : adj)
+        if (e.t0 != -1 && e.t1 != -1) q.push(k);
+
+    auto pushTriEdges = [&](int t) {
+        const uint32_t a = tric(t,0), b = tric(t,1), c = tric(t,2);
+        q.push({std::min(a,b), std::max(a,b)});
+        q.push({std::min(b,c), std::max(b,c)});
+        q.push({std::min(c,a), std::max(c,a)});
+    };
+
+    while (!q.empty()) {
+        const EdgeKey k = q.front(); q.pop();
+        auto it = adj.find(k);
+        if (it == adj.end()) continue;
+
+        auto& E = it->second;
+        if (E.t0 == -1 || E.t1 == -1) continue;
+
+        const uint32_t a = k.a, b = k.b;
+        const uint32_t c = E.opp0, d = E.opp1;
+        const int t0 = E.t0, t1 = E.t1;
+
+        if (!IsConvexQuad(vertices, a,b,c,d)) continue;
+        if (Len2(vertices[c], vertices[d]) >= Len2(vertices[a], vertices[b])) continue;
+
+        const auto T0 = MakeCCW(vertices, c, d, a);
+        const auto T1 = MakeCCW(vertices, d, c, b);
+
+        clearTriangle(t0);
+        clearTriangle(t1);
+
+        tri(t0,0)=T0[0];
+        tri(t0,1)=T0[1];
+        tri(t0,2)=T0[2];
+
+        tri(t1,0)=T1[0];
+        tri(t1,1)=T1[1];
+        tri(t1,2)=T1[2];
+
+        rebuildTriangle(t0);
+        rebuildTriangle(t1);
+
+        pushTriEdges(t0);
+        pushTriEdges(t1);
+    }
+
+    return indices;
+}
+
+std::vector<uint32_t> EarClippingTriangulation(const std::vector<Vertex>& vertices) {
+    std::vector<uint32_t> indices;
+    const size_t n = vertices.size();
+
+    if (n < 3) return indices;
+
+    const bool isCCW = Helpers::PolygonSignedArea(vertices) >= 0.0;
+
+    // Working list of remaining vertex indices
+    std::vector<uint32_t> polygon(n);
+    std::iota(polygon.begin(), polygon.end(), 0);
+
+    indices.reserve((n - 2) * 3);
+
+    // Clip ears until only 3 vertices remain
+    while (polygon.size() > 3) {
+        const size_t size = polygon.size();
+        bool earFound = false;
+
+        for (size_t i = 0; i < size; ++i) {
+            const size_t prev = (i + size - 1) % size;
+            const size_t next = (i + 1) % size;
+
+            if (Helpers::IsValidEar(vertices, polygon, prev, i, next, isCCW)) {
+                // Emit triangle
+                indices.push_back(polygon[prev]);
+                indices.push_back(polygon[i]);
+                indices.push_back(polygon[next]);
+
+                // Remove the ear vertex
+                polygon.erase(polygon.begin() + static_cast<ptrdiff_t>(i));
+                earFound = true;
+                break;
+            }
+        }
+
+        if (!earFound) {
+            break;
+        }
+    }
+
+    // Add final triangle
+    if (polygon.size() == 3) {
+        indices.push_back(polygon[0]);
+        indices.push_back(polygon[1]);
+        indices.push_back(polygon[2]);
+    }
+
+    indices = OptimizeByMinLengthFlips(vertices, indices);
+    return indices;
+}
+
+
 std::vector<uint32_t> EarClippingTriangulation_Triangulator(const std::vector<Vertex>& vertices) {
     std::vector<uint32_t> indices;
     const size_t n = vertices.size();
-    
     if (n < 3) {
         return indices;
     }
-    
-    // Convert Vertex format to Triangulator format (2D points)
-    std::vector<std::array<double, 2>> contour;
+
+    std::vector<Triangulator::Vec2> contour;
     contour.reserve(n);
     for (const auto& v : vertices) {
-        contour.push_back({static_cast<double>(v.position.x), static_cast<double>(v.position.y)});
+        contour.push_back({double(v.position.x), double(v.position.y)});
     }
-    
-    // Call Triangulator's ear clipping (delaunay=false for pure ear clipping)
+
+    if (Helpers::PolygonSignedArea(vertices) < 0.0) {
+        std::reverse(contour.begin(), contour.end());
+    }
+
     Triangulator::Diagnostics diagnostics;
-    auto triangles = Triangulator::triangulate1(contour, diagnostics, false, true);
-    
-    // Convert output format: std::vector<std::array<std::size_t,3>> -> std::vector<uint32_t>
+    const auto triangles = Triangulator::triangulate1(contour, diagnostics, false, false);
+
     indices.reserve(triangles.size() * 3);
     for (const auto& tri : triangles) {
-        indices.push_back(static_cast<uint32_t>(tri[0]));
-        indices.push_back(static_cast<uint32_t>(tri[1]));
-        indices.push_back(static_cast<uint32_t>(tri[2]));
+        indices.push_back(uint32_t(tri[0]));
+        indices.push_back(uint32_t(tri[1]));
+        indices.push_back(uint32_t(tri[2]));
     }
-    
+
+    indices = OptimizeByMinLengthFlips(vertices, std::move(indices));
     return indices;
 }
 
