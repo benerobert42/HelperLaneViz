@@ -80,6 +80,7 @@
     int _benchmarkDelayFrames;
     struct BenchmarkResult {
         uint64_t helperSum;
+        double totalEdgeLength;
         double helperRatio;
         double trisPerTileMean, trisPerTileMed, trisPerTileP95;
         double tilesPerTriMean, tilesPerTriMed, tilesPerTriP95;
@@ -387,6 +388,8 @@
         }
     }
     if (_hasMeshMetrics) {
+        ImGui::Text("Edges=%f",
+                    _lastMeshMetrics.totalEdgeLength);
         ImGui::Text("Tris=%zu  TotalTileOverlaps=%.0f  BCI=%.3f",
                     _lastMeshMetrics.triangleCount,
                     _lastMeshMetrics.totalTileOverlaps,
@@ -403,9 +406,10 @@
     
     ImGui::Separator();
     if (ImGui::Button("Print Summary for Table")) {
-        printf("TriCount\tHelperSum\tHelperRatio\tTris/Tile Mean\tTris/Tile Med\tTris/Tile P95\tTiles/Tri Mean\tTiles/Tri Med\tTiles/Tri P95\tFrametime Mean\tFrametime Med\tFrametime Dev\n");
-        printf("%zu\t%llu\t%.3f\t%.2f\t%.2f\t%.2f\t%.2f\t%.2f\t%.2f\t%.3f\t%.3f\t%.3f\n",
+        printf("TriCount\tTotalEdgeLength\tHelperSum\tHelperRatio\tTris/Tile Mean\tTris/Tile Med\tTris/Tile P95\tTiles/Tri Mean\tTiles/Tri Med\tTiles/Tri P95\tFrametime Mean\tFrametime Med\tFrametime Dev\n");
+        printf("%zu\t%.2f\t%llu\t%.3f\t%.2f\t%.2f\t%.2f\t%.2f\t%.2f\t%.2f\t%.3f\t%.3f\t%.3f\n",
                _hasMeshMetrics ? _lastMeshMetrics.triangleCount : 0,
+               _hasMeshMetrics ? _lastMeshMetrics.totalEdgeLength : 0,
                _lastHelperSum,
                _lastHelperRatio,
                _hasMeshMetrics ? _lastMeshMetrics.trianglesPerTile_Mean : 0.0,
@@ -650,6 +654,7 @@
                 BenchmarkResult& r = _benchmarkResults[_benchmarkMethodIndex];
                 r.helperSum = _lastHelperSum;
                 r.helperRatio = _lastHelperRatio;
+                r.totalEdgeLength = _hasMeshMetrics ? _lastMeshMetrics.totalEdgeLength : 0;
                 r.trisPerTileMean = _hasMeshMetrics ? _lastMeshMetrics.trianglesPerTile_Mean : 0;
                 r.trisPerTileMed = _hasMeshMetrics ? _lastMeshMetrics.trianglesPerTile_Median : 0;
                 r.trisPerTileP95 = _hasMeshMetrics ? _lastMeshMetrics.trianglesPerTile_P95 : 0;
@@ -664,12 +669,12 @@
                 _benchmarkMethodIndex++;
                 if (_benchmarkMethodIndex >= 8) {
                     // Done - print results
-                    printf("\nMethod\tTriCount\tHelperSum\tHelperRatio\tTris/Tile Mean\tTris/Tile Med\tTris/Tile P95\tTiles/Tri Mean\tTiles/Tri Med\tTiles/Tri P95\tFrametime Mean\tFrametime Med\tFrametime Dev\n");
+                    printf("\nMethod\tTriCount\tTotalEdgeLength\tHelperSum\tHelperRatio\tTris/Tile Mean\tTris/Tile Med\tTris/Tile P95\tTiles/Tri Mean\tTiles/Tri Med\tTiles/Tri P95\tFrametime Mean\tFrametime Med\tFrametime Dev\n");
                     for (int i = 0; i < 8; i++) {
                         if (i == 2) continue;  // Skip CentroidFan
                         BenchmarkResult& br = _benchmarkResults[i];
-                        printf("%s\t%zu\t%llu\t%.3f\t%.2f\t%.2f\t%.2f\t%.2f\t%.2f\t%.2f\t%.3f\t%.3f\t%.3f\n",
-                               methodNames[i], br.triCount, br.helperSum, br.helperRatio,
+                        printf("%s\t%zu\t%.2f\t%llu\t%.3f\t%.2f\t%.2f\t%.2f\t%.2f\t%.2f\t%.2f\t%.3f\t%.3f\t%.3f\n",
+                               methodNames[i], br.triCount, br.totalEdgeLength, br.helperSum, br.helperRatio,
                                br.trisPerTileMean, br.trisPerTileMed, br.trisPerTileP95,
                                br.tilesPerTriMean, br.tilesPerTriMed, br.tilesPerTriP95,
                                br.frametimeMean, br.frametimeMed, br.frametimeDev);

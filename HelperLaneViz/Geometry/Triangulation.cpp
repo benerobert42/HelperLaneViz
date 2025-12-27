@@ -16,6 +16,7 @@
 #include <Eigen/Core>
 #include <igl/triangle/triangulate.h>
 #include "triangulator.h"
+#include <mapbox/earcut.hpp>
 
 namespace Triangulation {
 
@@ -29,233 +30,6 @@ double CalculateTotalEdgeLength(const std::vector<Vertex>& vertices,
 }
 
 // MARK: Simple triangulations
-std::vector<uint32_t> EarClippingTriangulation_MinDiagonalPQ(const std::vector<Vertex>& vertices) {
-    std::vector<uint32_t> indices;
-    const uint32_t n = static_cast<uint32_t>(vertices.size());
-    if (n < 3)
-    {
-        return indices;
-    }
-
-    const bool isCCW = Helpers::PolygonSignedArea(vertices) >= 0.0;
-
-    // Doubly-linked list on top of the polygon index list
-    std::vector<uint32_t> polygon(n);
-    std::iota(polygon.begin(), polygon.end(), 0);
-
-    std::vector<int> prev(n);
-    std::vector<int> next(n);
-    std::vector<bool> alive(n, true);
-
-    for (uint32_t i = 0; i < n; ++i) {
-        prev[i] = (i - 1 + n) % n;
-        next[i] = (i + 1) % n;
-    }
-
-    uint32_t remaining = n;
-
-    // Versioning for lazy PQ invalidation: bump when a vertex's ear candidate must be recomputed
-    std::vector<uint32_t> version(n, 0);
-
-    struct EarCandidate {
-        double score;       // lower is better
-        int i;              // vertex in linked list (index into [0..n))
-        uint32_t version;   // version at insertion time
-    };
-    struct EarCandidateGreater {
-        bool operator()(const EarCandidate& a, const EarCandidate& b) const {
-            return a.score > b.score; // min-heap
-        }
-    };
-
-    std::priority_queue<EarCandidate, std::vector<EarCandidate>, EarCandidateGreater> pq;
-
-    // Builds a small "polygon list" view for IsValidEar:
-    // it expects a list of remaining vertex indices in order.
-    // To keep diff minimal, we rebuild it only for the ear check (local cost),
-    // BUT doing this would destroy performance.
-    //
-    // So instead: we create ONE ordered polygon list (initially [0..n-1]) and maintain it
-    // via alive/prev/next, and we provide IsValidEar with that list plus indices.
-    //
-    // Your Helpers::IsValidEar signature is:
-    // IsValidEar(vertices, polygon, prevIndexInPolygonArray, iIndexInPolygonArray, nextIndexInPolygonArray, isCCW)
-    //
-    // That API uses "indices into polygon array", not vertex ids.
-    // For min diff, we keep a mapping from "current linked-list vertex" -> its position in
-    // a dynamically rebuilt polygon array when needed.
-    //
-    // HOWEVER: rebuilding that array every time kills the PQ benefit.
-    //
-    // So: we assume (as in your current code) that IsValidEar needs the actual ordered list.
-    // The best minimal-diff path is: keep an ordered vector of the current polygon and
-    // update it with erase (like you do). But then PQ can’t work.
-    //
-    // Therefore, below we implement a small adapter: we maintain a current ordered polygon
-    // vector AND a position map, and we update them incrementally when clipping an ear.
-    // This keeps diff small and makes PQ viable.
-
-    std::vector<uint32_t> poly = polygon;          // ordered list of vertex ids
-    std::vector<int> pos(n);                       // vertex id -> position in poly
-    for (int k = 0; k < n; ++k) pos[poly[k]] = k;
-
-    auto pushIfEar = [&](uint32_t v) {
-        if (!alive[v]) return;
-
-        // Refresh version
-        ++version[v];
-
-        // Need current positions in poly
-        const int pi = pos[v];
-        if (pi < 0) return;
-
-        const int sz = static_cast<int>(poly.size());
-        if (sz < 3) return;
-
-        const int ppos = (pi - 1 + sz) % sz;
-        const int npos = (pi + 1) % sz;
-
-        if (!Helpers::IsValidEar(vertices, poly,
-                                static_cast<size_t>(ppos),
-                                static_cast<size_t>(pi),
-                                static_cast<size_t>(npos),
-                                isCCW)) {
-            return;
-        }
-
-        const uint32_t pv = poly[ppos];
-        const uint32_t nv = poly[npos];
-
-        // Objective: minimize diagonal (prev-next). Use squared or actual?
-        // Use squared length if your Helpers doesn't expose squared; otherwise EdgeLength is fine.
-        const double score = Helpers::EdgeLength(vertices[pv], vertices[nv]);
-
-        pq.push(EarCandidate{score, static_cast<int>(v), version[v]});
-    };
-
-    // Initialize heap with all ears
-    for (uint32_t v = 0; v < n; ++v) {
-        pushIfEar(v);
-    }
-
-    indices.reserve((n - 2) * 3);
-
-    auto eraseFromPoly = [&](int removePos) {
-        const uint32_t v = poly[removePos];
-
-        // erase from ordered vector
-        poly.erase(poly.begin() + removePos);
-
-        // update positions for elements after removePos
-        for (int k = removePos; k < static_cast<int>(poly.size()); ++k) {
-            pos[poly[k]] = k;
-        }
-        pos[v] = -1;
-    };
-
-    while (remaining > 3) {
-        bool found = false;
-        uint32_t earV = 0;
-
-        while (!pq.empty()) {
-            const EarCandidate cand = pq.top();
-            pq.pop();
-
-            const uint32_t v = static_cast<uint32_t>(cand.i);
-            if (v >= n || !alive[v]) continue;
-            if (cand.version != version[v]) continue; // stale heap entry
-
-            // Re-validate because neighborhood could have changed
-            const int pi = pos[v];
-            if (pi < 0) continue;
-
-            const int sz = static_cast<int>(poly.size());
-            const int ppos = (pi - 1 + sz) % sz;
-            const int npos = (pi + 1) % sz;
-
-            if (!Helpers::IsValidEar(vertices, poly,
-                                    static_cast<size_t>(ppos),
-                                    static_cast<size_t>(pi),
-                                    static_cast<size_t>(npos),
-                                    isCCW)) {
-                // it might become an ear later; refresh it now
-                pushIfEar(v);
-                continue;
-            }
-
-            earV = v;
-            found = true;
-            break;
-        }
-
-        if (!found) {
-            // fallback: behave like your original code (avoid total failure)
-            bool earFound = false;
-            const size_t sz = poly.size();
-            for (size_t i = 0; i < sz; ++i) {
-                const size_t p = (i + sz - 1) % sz;
-                const size_t q = (i + 1) % sz;
-                if (Helpers::IsValidEar(vertices, poly, p, i, q, isCCW)) {
-                    indices.push_back(poly[p]);
-                    indices.push_back(poly[i]);
-                    indices.push_back(poly[q]);
-
-                    alive[poly[i]] = false;
-                    eraseFromPoly(static_cast<int>(i));
-                    --remaining;
-
-                    // neighbors changed
-                    if (poly.size() >= 3) {
-                        const int newSz = static_cast<int>(poly.size());
-                        const int leftPos  = (static_cast<int>(i) - 1 + newSz) % newSz;
-                        const int rightPos = static_cast<int>(i) % newSz;
-                        pushIfEar(poly[leftPos]);
-                        pushIfEar(poly[rightPos]);
-                    }
-                    earFound = true;
-                    break;
-                }
-            }
-            if (!earFound) break;
-            continue;
-        }
-
-        // Clip chosen ear
-        const int pi = pos[earV];
-        const int sz = static_cast<int>(poly.size());
-        const int ppos = (pi - 1 + sz) % sz;
-        const int npos = (pi + 1) % sz;
-
-        const uint32_t pv = poly[ppos];
-        const uint32_t v  = poly[pi];
-        const uint32_t nv = poly[npos];
-
-        indices.push_back(pv);
-        indices.push_back(v);
-        indices.push_back(nv);
-
-        alive[v] = false;
-
-        // Remove v from the ordered polygon
-        eraseFromPoly(pi);
-        --remaining;
-
-        // Only neighbors can change ear status: pv and nv (now adjacent)
-        if (poly.size() >= 3) {
-            pushIfEar(pv);
-            pushIfEar(nv);
-        }
-    }
-
-    if (poly.size() == 3) {
-        indices.push_back(poly[0]);
-        indices.push_back(poly[1]);
-        indices.push_back(poly[2]);
-    }
-
-    return indices;
-}
-
 static inline double Orient2D(const Vertex& a, const Vertex& b, const Vertex& c) {
     const double ax = a.position.x, ay = a.position.y;
     const double bx = b.position.x, by = b.position.y;
@@ -284,125 +58,215 @@ static inline bool IsConvexQuad(const std::vector<Vertex>& V,
 }
 
 struct EdgeKey {
-    uint32_t a, b; // a<b
-    bool operator==(const EdgeKey& o) const { return a==o.a && b==o.b; }
+    uint32_t a, b;
+    bool operator==(const EdgeKey& o) const { return a == o.a && b == o.b; }
 };
 struct EdgeKeyHash {
     size_t operator()(const EdgeKey& k) const noexcept {
-        return (size_t)k.a * 73856093u ^ (size_t)k.b * 19349663u;
+        // 64-bit mix of two 32-bit ints
+        return (size_t(k.a) << 32) ^ size_t(k.b);
     }
 };
+
 struct EdgeAdj {
     int t0 = -1, t1 = -1;
     uint32_t opp0 = 0, opp1 = 0;
+    uint32_t ver = 0; // bump on any mutation
 };
 
-static inline std::array<uint32_t,3> MakeCCW(const std::vector<Vertex>& V,
-                                             uint32_t x, uint32_t y, uint32_t z) {
-    if (Orient2D(V[x], V[y], V[z]) > 0.0) return {x,y,z};
-    return {x,z,y};
+static inline EdgeKey MakeKey(uint32_t u, uint32_t v) {
+    return EdgeKey{ std::min(u, v), std::max(u, v) };
 }
 
-// --- Add this function in namespace Triangulation ---
+static inline float Cross2(const Vertex& a, const Vertex& b, const Vertex& c) {
+    const float abx = b.position.x - a.position.x;
+    const float aby = b.position.y - a.position.y;
+    const float acx = c.position.x - a.position.x;
+    const float acy = c.position.y - a.position.y;
+    return abx * acy - aby * acx;
+}
 
-std::vector<uint32_t> OptimizeByMinLengthFlips(const std::vector<Vertex>& vertices,
-                                               std::vector<uint32_t> indices)
-{
-    const int triCount = int(indices.size() / 3);
-    if (triCount <= 0) {
-        return indices;
+static inline std::array<uint32_t,3> MakeCCW(
+    const std::vector<Vertex>& v,
+    uint32_t i0, uint32_t i1, uint32_t i2
+) {
+    // If (i0,i1,i2) is CCW keep, else swap i1/i2
+    if (Cross2(v[i0], v[i1], v[i2]) >= 0.0f) {
+        return {i0, i1, i2};
+    } else {
+        return {i0, i2, i1};
     }
+}
 
-    auto tri = [&](int t, int k) -> uint32_t& { return indices[3*t + k]; };
-    auto tric = [&](int t, int k) -> uint32_t  { return indices[3*t + k]; };
+std::vector<uint32_t> OptimizeByMinLengthFlips_PQ(const std::vector<Vertex>& vertices,
+                                                std::vector<uint32_t> indices,
+                                                int maxFlips = -1,      // set e.g. 4*triCount for near-linear-ish
+                                                int maxPops  = -1       // set e.g. 20*triCount to cap heap work
+) {
+    const int triCount = int(indices.size() / 3);
+    if (triCount <= 0) return indices;
+
+    auto tri  = [&](int t, int k) -> uint32_t& { return indices[3 * t + k]; };
+    auto tric = [&](int t, int k) -> uint32_t  { return indices[3 * t + k]; };
 
     std::unordered_map<EdgeKey, EdgeAdj, EdgeKeyHash> adj;
     adj.reserve(indices.size() * 2);
 
+    auto bump = [&](const EdgeKey& key) {
+        auto it = adj.find(key);
+        if (it != adj.end()) {
+            ++it->second.ver;
+        }
+    };
+
     auto addEdge = [&](uint32_t u, uint32_t v, int t, uint32_t opp) {
-        EdgeKey key{std::min(u,v), std::max(u,v)};
+        EdgeKey key = MakeKey(u, v);
         auto& e = adj[key];
+        // any write mutates: bump version
+        ++e.ver;
+
         if (e.t0 == -1) {
             e.t0 = t;
             e.opp0 = opp;
-        }
-        else {
+        } else {
             e.t1 = t;
             e.opp1 = opp;
         }
     };
 
     auto rebuildTriangle = [&](int t) {
-        const uint32_t a = tric(t,0), b = tric(t,1), c = tric(t,2);
-        addEdge(a,b,t,c);
-        addEdge(b,c,t,a);
-        addEdge(c,a,t,b);
+        const uint32_t a = tric(t, 0), b = tric(t, 1), c = tric(t, 2);
+        addEdge(a, b, t, c);
+        addEdge(b, c, t, a);
+        addEdge(c, a, t, b);
     };
 
     auto clearTriangle = [&](int t) {
-        const uint32_t a = tric(t,0), b = tric(t,1), c = tric(t,2);
-        EdgeKey e0{std::min(a,b), std::max(a,b)};
-        EdgeKey e1{std::min(b,c), std::max(b,c)};
-        EdgeKey e2{std::min(c,a), std::max(c,a)};
+        const uint32_t a = tric(t, 0), b = tric(t, 1), c = tric(t, 2);
+        const EdgeKey e0 = MakeKey(a, b);
+        const EdgeKey e1 = MakeKey(b, c);
+        const EdgeKey e2 = MakeKey(c, a);
 
         auto clearOne = [&](const EdgeKey& k) {
             auto it = adj.find(k);
             if (it == adj.end()) return;
             auto& E = it->second;
+            // mutation => bump
+            ++E.ver;
+
             if (E.t0 == t) { E.t0 = -1; E.opp0 = 0; }
             if (E.t1 == t) { E.t1 = -1; E.opp1 = 0; }
         };
 
-        clearOne(e0); clearOne(e1); clearOne(e2);
+        clearOne(e0);
+        clearOne(e1);
+        clearOne(e2);
     };
 
     for (int t = 0; t < triCount; ++t) rebuildTriangle(t);
 
-    std::queue<EdgeKey> q;
-    for (auto& [k, e] : adj)
-        if (e.t0 != -1 && e.t1 != -1) q.push(k);
+    // ---- PQ of candidate flips (max gain first) ----
+    struct Cand {
+        double gain;    // >0 is improving
+        EdgeKey k;
+        uint32_t ver;
+    };
+    struct CandLess {
+        bool operator()(const Cand& a, const Cand& b) const {
+            return a.gain < b.gain; // max-heap
+        }
+    };
+    std::priority_queue<Cand, std::vector<Cand>, CandLess> pq;
 
-    auto pushTriEdges = [&](int t) {
-        const uint32_t a = tric(t,0), b = tric(t,1), c = tric(t,2);
-        q.push({std::min(a,b), std::max(a,b)});
-        q.push({std::min(b,c), std::max(b,c)});
-        q.push({std::min(c,a), std::max(c,a)});
+    auto len2 = [&](uint32_t i, uint32_t j) -> double {
+        const double dx = double(vertices[i].position.x) - double(vertices[j].position.x);
+        const double dy = double(vertices[i].position.y) - double(vertices[j].position.y);
+        return dx * dx + dy * dy;
     };
 
-    while (!q.empty()) {
-        const EdgeKey k = q.front(); q.pop();
+    auto tryPushEdge = [&](const EdgeKey& k) {
         auto it = adj.find(k);
-        if (it == adj.end()) continue;
-
-        auto& E = it->second;
-        if (E.t0 == -1 || E.t1 == -1) continue;
+        if (it == adj.end()) return;
+        const auto& E = it->second;
+        if (E.t0 == -1 || E.t1 == -1) return; // boundary / not 2-sided
 
         const uint32_t a = k.a, b = k.b;
         const uint32_t c = E.opp0, d = E.opp1;
+
+        // Must still be a convex quad in geometry
+        if (!IsConvexQuad(vertices, a, b, c, d)) return;
+
+        // improving if new diagonal shorter
+        const double oldD = len2(a, b);
+        const double newD = len2(c, d);
+        const double gain = oldD - newD;
+        if (gain <= 0.0) return;
+
+        pq.push(Cand{gain, k, E.ver});
+    };
+
+    for (const auto& [k, e] : adj) {
+        (void)e;
+        tryPushEdge(k);
+    }
+
+    auto pushTriEdges = [&](int t) {
+        const uint32_t a = tric(t, 0), b = tric(t, 1), c = tric(t, 2);
+        tryPushEdge(MakeKey(a, b));
+        tryPushEdge(MakeKey(b, c));
+        tryPushEdge(MakeKey(c, a));
+    };
+
+    int flips = 0;
+    int pops  = 0;
+
+    while (!pq.empty()) {
+        if (maxPops >= 0 && pops >= maxPops) break;
+        ++pops;
+
+        const Cand cand = pq.top();
+        pq.pop();
+
+        auto it = adj.find(cand.k);
+        if (it == adj.end()) continue;
+
+        auto& E = it->second;
+        if (E.ver != cand.ver) continue;         // stale
+        if (E.t0 == -1 || E.t1 == -1) continue;  // no longer interior
+
+        const uint32_t a = cand.k.a, b = cand.k.b;
+        const uint32_t c = E.opp0, d = E.opp1;
         const int t0 = E.t0, t1 = E.t1;
 
-        if (!IsConvexQuad(vertices, a,b,c,d)) continue;
-        if (Len2(vertices[c], vertices[d]) >= Len2(vertices[a], vertices[b])) continue;
+        // Re-check (neighbors may have moved but ver guard usually catches)
+        if (!IsConvexQuad(vertices, a, b, c, d)) continue;
 
+        const double oldD = len2(a, b);
+        const double newD = len2(c, d);
+        if (newD >= oldD) continue; // no longer improving
+
+        // Optional hard cap on number of flips for "near-linear" budget
+        if (maxFlips >= 0 && flips >= maxFlips) break;
+
+        // Build new triangles using the other diagonal (c-d)
         const auto T0 = MakeCCW(vertices, c, d, a);
         const auto T1 = MakeCCW(vertices, d, c, b);
 
+        // Update mesh
         clearTriangle(t0);
         clearTriangle(t1);
 
-        tri(t0,0)=T0[0];
-        tri(t0,1)=T0[1];
-        tri(t0,2)=T0[2];
-
-        tri(t1,0)=T1[0];
-        tri(t1,1)=T1[1];
-        tri(t1,2)=T1[2];
+        tri(t0, 0) = T0[0]; tri(t0, 1) = T0[1]; tri(t0, 2) = T0[2];
+        tri(t1, 0) = T1[0]; tri(t1, 1) = T1[1]; tri(t1, 2) = T1[2];
 
         rebuildTriangle(t0);
         rebuildTriangle(t1);
 
+        // Re-enqueue affected neighborhood (only local)
         pushTriEdges(t0);
         pushTriEdges(t1);
+
+        ++flips;
     }
 
     return indices;
@@ -456,7 +320,6 @@ std::vector<uint32_t> EarClippingTriangulation(const std::vector<Vertex>& vertic
         indices.push_back(polygon[2]);
     }
 
-    indices = OptimizeByMinLengthFlips(vertices, indices);
     return indices;
 }
 
@@ -468,27 +331,23 @@ std::vector<uint32_t> EarClippingTriangulation_Triangulator(const std::vector<Ve
         return indices;
     }
 
-    std::vector<Triangulator::Vec2> contour;
+    // Convert Vertex format to earcut format (std::vector<std::vector<Point>>)
+    // earcut expects: std::vector<std::vector<std::array<Coord, 2>>>
+    using Point = std::array<double, 2>;
+    std::vector<std::vector<Point>> polygon;
+    
+    // Create the main polygon contour
+    std::vector<Point> contour;
     contour.reserve(n);
     for (const auto& v : vertices) {
-        contour.push_back({double(v.position.x), double(v.position.y)});
+        contour.push_back({static_cast<double>(v.position.x), static_cast<double>(v.position.y)});
     }
+    polygon.push_back(std::move(contour));
 
-    if (Helpers::PolygonSignedArea(vertices) < 0.0) {
-        std::reverse(contour.begin(), contour.end());
-    }
-
-    Triangulator::Diagnostics diagnostics;
-    const auto triangles = Triangulator::triangulate1(contour, diagnostics, false, false);
-
-    indices.reserve(triangles.size() * 3);
-    for (const auto& tri : triangles) {
-        indices.push_back(uint32_t(tri[0]));
-        indices.push_back(uint32_t(tri[1]));
-        indices.push_back(uint32_t(tri[2]));
-    }
-
-    indices = OptimizeByMinLengthFlips(vertices, std::move(indices));
+    // Run earcut triangulation
+    // Returns array of indices that refer to the vertices of the input polygon
+    indices = mapbox::earcut<uint32_t>(polygon);
+    indices = OptimizeByMinLengthFlips_PQ(vertices, indices);
     return indices;
 }
 
@@ -1009,7 +868,7 @@ std::vector<uint32_t> ConstrainedDelaunayTriangulation(const std::vector<Vertex>
         triangleIndices.push_back(static_cast<uint32_t>(outputFaces(faceIndex, 1)));
         triangleIndices.push_back(static_cast<uint32_t>(outputFaces(faceIndex, 2)));
     }
-    
+
     return triangleIndices;
 }
 
