@@ -15,7 +15,6 @@
 
 typedef NS_ENUM(NSInteger, TriangulationMethod) {
     TriangulationMethodEarClipping,
-    TriangulationMethodEarClippingMinDiagonalPQ,
     TriangulationMethodEarClippingTriangulator,
     TriangulationMethodMinimumWeight,
     TriangulationMethodCentroidFan,

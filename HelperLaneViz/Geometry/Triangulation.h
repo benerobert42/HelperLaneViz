@@ -22,8 +22,8 @@ double calculateTotalEdgeLength(const std::vector<Vertex>& vertices,
 
 // Simple algorithms without specific optimisation target
 std::vector<uint32_t> EarClippingTriangulation(const std::vector<Vertex>& vertices);
-std::vector<uint32_t> EarClippingTriangulation_MinDiagonalPQ(const std::vector<Vertex>& vertices);
 std::vector<uint32_t> EarClippingTriangulation_Triangulator(const std::vector<Vertex>& vertices);
+std::vector<uint32_t> EarClippingTriangulation_Triangulator_Flipped(const std::vector<Vertex>& vertices);
 std::vector<uint32_t> CentroidFanTriangulation(std::vector<Vertex>& vertices);
 std::vector<uint32_t> StripTriangulation(const std::vector<Vertex>& vertices);
 
@@ -43,5 +43,7 @@ std::vector<uint32_t> MinMaxAreaTriangulation(const std::vector<Vertex>& vertice
 
 // libigl's Triangle library wrapper based Constrained Delaunay Triangulation.
 std::vector<uint32_t> ConstrainedDelaunayTriangulation(const std::vector<Vertex>& vertices);
+
+std::vector<uint32_t> ConstrainedDelaunayTriangulation_Flipped(const std::vector<Vertex>& vertices);
 
 } // namespace Triangulation

@@ -256,7 +256,6 @@
     {
         const char* triMethods[] = {
             "Ear Clipping",
-            "Ear Clipping (Min Diagonal PQ)",
             "Ear Clipping (Triangulator)",
             "Minimum Weight",
             "Centroid Fan",
