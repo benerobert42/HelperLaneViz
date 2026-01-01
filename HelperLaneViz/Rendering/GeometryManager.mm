@@ -189,23 +189,27 @@
             break;
             
         case TriangulationMethodEarClippingTriangulator:
-            indices = Triangulation::EarClippingTriangulation_Triangulator(mutableVerts);
+            indices = Triangulation::EarClippingTriangulationMapbox(mutableVerts);
             break;
             
-        case TriangulationMethodMinimumWeight:
-            indices = Triangulation::MinimumWeightTriangulation(mutableVerts, shouldHandleConcave);
+        case TriangulationMethodEarClippingTriangulatorFlipped:
+            indices = Triangulation::EarClippingTriangulationMapboxFlipped(mutableVerts);
             break;
             
         case TriangulationMethodCentroidFan:
             indices = Triangulation::CentroidFanTriangulation(mutableVerts);
             break;
             
+        case TriangulationMethodStrip:
+            indices = Triangulation::StripTriangulation(mutableVerts);
+            break;
+            
         case TriangulationMethodGreedyMaxArea:
             indices = Triangulation::GreedyMaxAreaTriangulation(mutableVerts, shouldHandleConcave);
             break;
             
-        case TriangulationMethodStrip:
-            indices = Triangulation::StripTriangulation(mutableVerts);
+        case TriangulationMethodMinimumWeight:
+            indices = Triangulation::MinimumWeightTriangulation(mutableVerts, shouldHandleConcave);
             break;
             
         case TriangulationMethodMaxMinArea:
@@ -218,6 +222,10 @@
             
         case TriangulationMethodConstrainedDelaunay:
             indices = Triangulation::ConstrainedDelaunayTriangulation(mutableVerts);
+            break;
+            
+        case TriangulationMethodConstrainedDelaunayFlipped:
+            indices = Triangulation::ConstrainedDelaunayTriangulation_Flipped(mutableVerts);
             break;
     }
     

@@ -15,7 +15,8 @@
 typedef NS_ENUM(NSInteger, VisualizationMode) {
     VisualizationModeHelperLane, // Helper lane visualization (default)
     VisualizationModeWireframe, // Wireframe with fill mode lines
-    VisualizationModeOverdraw // Overdraw visualization
+    VisualizationModeOverdraw, // Overdraw visualization
+    VisualizationModePrintFriendly // Print friendly: white background, red wireframe, no grid
 };
 
 NS_ASSUME_NONNULL_BEGIN

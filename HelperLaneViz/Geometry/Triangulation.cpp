@@ -20,27 +20,12 @@
 
 namespace Triangulation {
 
-double CalculateTotalEdgeLength(const std::vector<Vertex>& vertices,
-                                const std::vector<uint32_t>& indices) {
-    double total = 0.0;
-    for (size_t i = 0; i < indices.size(); i += 3) {
-        total += Helpers::TrianglePerimeter(vertices, indices[i], indices[i+1], indices[i+2]);
-    }
-    return total;
-}
-
 // MARK: Simple triangulations
 static inline double Orient2D(const Vertex& a, const Vertex& b, const Vertex& c) {
     const double ax = a.position.x, ay = a.position.y;
     const double bx = b.position.x, by = b.position.y;
     const double cx = c.position.x, cy = c.position.y;
     return (bx-ax)*(cy-ay) - (by-ay)*(cx-ax);
-}
-
-static inline double Len2(const Vertex& a, const Vertex& b) {
-    const double dx = double(a.position.x) - double(b.position.x);
-    const double dy = double(a.position.y) - double(b.position.y);
-    return dx*dx + dy*dy;
 }
 
 static inline bool IsConvexQuad(const std::vector<Vertex>& V,
@@ -83,20 +68,12 @@ static inline EdgeKey MakeKey(uint32_t u, uint32_t v) {
     return EdgeKey{ std::min(u, v), std::max(u, v) };
 }
 
-static inline float Cross2(const Vertex& a, const Vertex& b, const Vertex& c) {
-    const float abx = b.position.x - a.position.x;
-    const float aby = b.position.y - a.position.y;
-    const float acx = c.position.x - a.position.x;
-    const float acy = c.position.y - a.position.y;
-    return abx * acy - aby * acx;
-}
-
-static inline std::array<uint32_t,3> MakeCCW(
-    const std::vector<Vertex>& v,
-    uint32_t i0, uint32_t i1, uint32_t i2
-) {
+static inline std::array<uint32_t,3> MakeCCW(const std::vector<Vertex>& v,
+                                             uint32_t i0,
+                                             uint32_t i1,
+                                             uint32_t i2) {
     // If (i0,i1,i2) is CCW keep, else swap i1/i2
-    if (Cross2(v[i0], v[i1], v[i2]) >= 0.0f) {
+    if (Helpers::Cross2D(v[i0].position, v[i1].position, v[i2].position) >= 0.0f) {
         return {i0, i1, i2};
     } else {
         return {i0, i2, i1};
@@ -372,7 +349,7 @@ std::vector<uint32_t> EarClippingTriangulation(const std::vector<Vertex>& vertic
     return indices;
 }
 
-std::vector<uint32_t> EarClippingTriangulation_Triangulator(const std::vector<Vertex>& vertices) {
+std::vector<uint32_t> EarClippingTriangulationMapbox(const std::vector<Vertex>& vertices) {
     std::vector<uint32_t> indices;
     const size_t n = vertices.size();
     if (n < 3) {
@@ -398,7 +375,7 @@ std::vector<uint32_t> EarClippingTriangulation_Triangulator(const std::vector<Ve
     return indices;
 }
 
-std::vector<uint32_t> EarClippingTriangulation_Triangulator_Flipped(const std::vector<Vertex>& vertices) {
+std::vector<uint32_t> EarClippingTriangulationMapboxFlipped(const std::vector<Vertex>& vertices) {
     std::vector<uint32_t> indices;
     const size_t n = vertices.size();
     if (n < 3) {
@@ -988,6 +965,5 @@ std::vector<uint32_t> ConstrainedDelaunayTriangulation_Flipped(const std::vector
     triangleIndices = OptimizeByMinLengthFlips_PQ(vertices, triangleIndices);
     return triangleIndices;
 }
-
 
 } // namespace Triangulation

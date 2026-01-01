@@ -72,6 +72,17 @@ id<MTLRenderPipelineState> MakeWireframePipelineState(id<MTLDevice> device,
     return [device newRenderPipelineStateWithDescriptor:d error:error];
 }
 
+id<MTLRenderPipelineState> MakePrintFriendlyPipelineState(id<MTLDevice> device,
+                                                          MTKView *view,
+                                                          id<MTLLibrary> library,
+                                                          NSError **error) {
+    MTLRenderPipelineDescriptor *d = CommonPipelineDescriptor(view);
+    d.label = @"PrintFriendlyPipeline";
+    d.vertexFunction = [library newFunctionWithName:@"mainVS"];
+    d.fragmentFunction = [library newFunctionWithName:@"printFriendlyFS"];
+    return [device newRenderPipelineStateWithDescriptor:d error:error];
+}
+
 id<MTLRenderPipelineState> MakeGridOverlayPipelineState(id<MTLDevice> device,
                                                         MTKView *view,
                                                         id<MTLLibrary> library,

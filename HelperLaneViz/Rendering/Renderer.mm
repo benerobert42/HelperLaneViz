@@ -14,12 +14,10 @@
 #import <MetalKit/MetalKit.h>
 
 @implementation Renderer {
-    // Core Metal objects
     id<MTLDevice> _device;
     id<MTLCommandQueue> _commandQueue;
     MTKView *_view;
     
-    // Managers
     GeometryManager *_geometryManager;
     MetricsComputer *_metricsComputer;
     RenderingManager *_renderingManager;
@@ -42,21 +40,18 @@
         _view.sampleCount = initialSampleCount;
     }
     
-    // Initialize managers
     _geometryManager = [[GeometryManager alloc] initWithDevice:_device];
     _metricsComputer = [[MetricsComputer alloc] initWithDevice:_device commandQueue:_commandQueue];
     _renderingManager = [[RenderingManager alloc] initWithDevice:_device view:mtkView];
     
-    // Set initial viewport size
-    vector_uint2 viewportSize = {(uint32_t)mtkView.drawableSize.width, (uint32_t)mtkView.drawableSize.height};
+    vector_uint2 viewportSize = {(uint32_t)mtkView.drawableSize.width,
+                                 (uint32_t)mtkView.drawableSize.height};
     [_geometryManager updateViewportSize:viewportSize];
     
     // Setup view (no depth buffer needed for 2D visualization)
     _view.clearColor = MTLClearColorMake(0, 0, 0, 1);
     _view.depthStencilPixelFormat = MTLPixelFormatInvalid;
-
     
-    // Load default SVG (can be removed or made configurable)
     NSString *defaultSVGPath = @"/Users/robi/Downloads/1295383.svg";
     [self loadSVGFromPath:defaultSVGPath
       triangulationMethod:TriangulationMethodMinimumWeight
@@ -74,7 +69,6 @@
        instanceGridCols:(uint32_t)cols
                gridRows:(uint32_t)rows
     bezierMaxDeviationPx:(float)bezierMaxDeviationPx {
-    
     BOOL success = [_geometryManager loadSVGFromPath:path
                                   triangulationMethod:method
                                      instanceGridCols:cols
@@ -124,15 +118,23 @@
     
     // Render UI (may return NO to skip frame, e.g. on MSAA change)
     BOOL shouldRender = [_renderingManager renderUIWithGeometry:_geometryManager
-                                     metrics:_metricsComputer
-                             onGeometryReload:^(NSString *path, TriangulationMethod method, uint32_t cols, uint32_t rows, float bezierDev) {
+                                                        metrics:_metricsComputer
+                                               onGeometryReload:^(NSString *path,
+                                                                  TriangulationMethod method,
+                                                                  uint32_t cols,
+                                                                  uint32_t rows,
+                                                                  float bezierDev) {
         [self->_geometryManager loadSVGFromPath:path
-              triangulationMethod:method
-                 instanceGridCols:cols
-                         gridRows:rows
-            bezierMaxDeviationPx:bezierDev];
+                            triangulationMethod:method
+                               instanceGridCols:cols
+                                       gridRows:rows
+                           bezierMaxDeviationPx:bezierDev];
     }
-                              onEllipseReload:^(float axisRatio, int vertexCount, TriangulationMethod method, uint32_t cols, uint32_t rows) {
+                                                onEllipseReload:^(float axisRatio,
+                                                                  int vertexCount,
+                                                                  TriangulationMethod method,
+                                                                  uint32_t cols,
+                                                                  uint32_t rows) {
         [self->_geometryManager generateEllipseWithAxisRatio:axisRatio
                                                  vertexCount:vertexCount
                                          triangulationMethod:method
@@ -151,6 +153,11 @@
         return;
     }
     
+    // Set white background for print-friendly mode
+    if (_renderingManager.visualizationMode == VisualizationModePrintFriendly) {
+        renderPassDescriptor.colorAttachments[0].clearColor = MTLClearColorMake(1, 1, 1, 1);
+    }
+    
     id<MTLRenderCommandEncoder> encoder = [commandBuffer renderCommandEncoderWithDescriptor:renderPassDescriptor];
 
     // Encode geometry rendering
@@ -158,12 +165,17 @@
                                          geometry:_geometryManager
                                              mode:_renderingManager.visualizationMode];
 
-    // Draw grid overlay if enabled (not shown during overdraw mode)
-    if (_renderingManager.showGridOverlay && _renderingManager.visualizationMode != VisualizationModeOverdraw) {
+    // Draw grid overlay if enabled (not shown during overdraw or print-friendly mode)
+    if (_renderingManager.showGridOverlay && 
+        _renderingManager.visualizationMode != VisualizationModeOverdraw &&
+        _renderingManager.visualizationMode != VisualizationModePrintFriendly) {
         [_renderingManager encodeGridOverlayWithEncoder:encoder drawableSize:view.drawableSize];
     }
     
-    // Render ImGUI (on top of everything)
+    // Reset triangle fill mode to Fill before rendering ImGUI (ImGUI should never be wireframe)
+    [encoder setTriangleFillMode:MTLTriangleFillModeFill];
+    
+    // Render ImGUI on top of everything
     [_renderingManager renderImGUIWithCommandBuffer:commandBuffer commandEncoder:encoder];
 
     [encoder endEncoding];

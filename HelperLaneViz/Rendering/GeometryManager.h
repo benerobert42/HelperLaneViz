@@ -16,13 +16,15 @@
 typedef NS_ENUM(NSInteger, TriangulationMethod) {
     TriangulationMethodEarClipping,
     TriangulationMethodEarClippingTriangulator,
-    TriangulationMethodMinimumWeight,
+    TriangulationMethodEarClippingTriangulatorFlipped,
     TriangulationMethodCentroidFan,
-    TriangulationMethodGreedyMaxArea,
     TriangulationMethodStrip,
+    TriangulationMethodGreedyMaxArea,
+    TriangulationMethodMinimumWeight,
     TriangulationMethodMaxMinArea,
     TriangulationMethodMinMaxArea,
-    TriangulationMethodConstrainedDelaunay
+    TriangulationMethodConstrainedDelaunay,
+    TriangulationMethodConstrainedDelaunayFlipped
 };
 
 NS_ASSUME_NONNULL_BEGIN

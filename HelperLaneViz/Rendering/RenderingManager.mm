@@ -13,11 +13,23 @@
 #import "TriangulationMetrics.h"
 #import "../ThirdParty/ImGUI/ImGUIHelper.h"
 #import "Measurements/GPUFrameTimer.h"
+#include "../Geometry/Triangulation.h"
 
 #import <Metal/Metal.h>
 #import <MetalKit/MetalKit.h>
+#include <mach/mach_time.h>
 
 #include "../../external/imgui/imgui.h"
+
+// Low-overhead timing utility using mach_absolute_time (nanosecond precision, minimal overhead)
+static inline double machTimeToMs(uint64_t start, uint64_t end) {
+    static mach_timebase_info_data_t timebase = {0};
+    if (timebase.denom == 0) {
+        mach_timebase_info(&timebase);
+    }
+    uint64_t elapsed = end - start;
+    return (double)elapsed * (double)timebase.numer / (double)timebase.denom / 1e6; // Convert to ms
+}
 
 @implementation RenderingManager {
     id<MTLDevice> _device;
@@ -27,6 +39,7 @@
     id<MTLRenderPipelineState> _mainPipeline;
     id<MTLRenderPipelineState> _wireframePipeline;
     id<MTLRenderPipelineState> _overdrawPipeline;
+    id<MTLRenderPipelineState> _printFriendlyPipeline;
     id<MTLRenderPipelineState> _gridOverlayPipeline;
     
     // Grid overlay
@@ -87,7 +100,7 @@
         double frametimeMean, frametimeMed, frametimeDev;
         size_t triCount;
     };
-    BenchmarkResult _benchmarkResults[8];  // One per triangulation method
+    BenchmarkResult _benchmarkResults[11];  // One per triangulation method
 }
 
 - (instancetype)initWithDevice:(id<MTLDevice>)device view:(MTKView *)view {
@@ -141,6 +154,9 @@
     _overdrawPipeline = MakeOverdrawPipelineState(_device, _view, library, &error);
     NSAssert(_overdrawPipeline, @"Failed to create overdraw pipeline: %@", error);
     
+    _printFriendlyPipeline = MakePrintFriendlyPipelineState(_device, _view, library, &error);
+    NSAssert(_printFriendlyPipeline, @"Failed to create print friendly pipeline: %@", error);
+    
     _gridOverlayPipeline = MakeGridOverlayPipelineState(_device, _view, library, &error);
     NSAssert(_gridOverlayPipeline, @"Failed to create grid overlay pipeline: %@", error);
 }
@@ -190,9 +206,9 @@
     
     // Visualization Mode
     {
-        const char* vizModes[] = { "Helper Lane", "Wireframe", "Overdraw" };
+        const char* vizModes[] = { "Helper Lane", "Wireframe", "Overdraw", "Print Friendly" };
         int currentMode = (int)_visualizationMode;
-        if (ImGui::Combo("Visualization Mode", &currentMode, vizModes, 3)) {
+        if (ImGui::Combo("Visualization Mode", &currentMode, vizModes, 4)) {
             _visualizationMode = (VisualizationMode)currentMode;
         }
     }
@@ -257,16 +273,18 @@
         const char* triMethods[] = {
             "Ear Clipping",
             "Ear Clipping (Triangulator)",
-            "Minimum Weight",
+            "Ear Clipping (Triangulator Flipped)",
             "Centroid Fan",
-            "Greedy Max Area",
             "Strip",
+            "Greedy Max Area",
+            "Minimum Weight",
             "Max-Min Area",
             "Min-Max Area",
-            "Constrained Delaunay"
+            "Constrained Delaunay",
+            "Constrained Delaunay (Flipped)"
         };
         int currentMethod = (int)_currentTriangulationMethod;
-        if (ImGui::Combo("Triangulation Method", &currentMethod, triMethods, 10)) {
+        if (ImGui::Combo("Triangulation Method", &currentMethod, triMethods, 11)) {
             _currentTriangulationMethod = (TriangulationMethod)currentMethod;
             if (_shapeType == 0 && _currentSVGPath) {
                 reloadBlock(_currentSVGPath, _currentTriangulationMethod, _instanceGridCols, _instanceGridRows, _bezierMaxDeviationPx);
@@ -422,6 +440,207 @@
                _hasGPUFrameResults ? _lastGPUFrameResults.stdDevMs : 0.0);
     }
     
+    if (ImGui::Button("Fast Edge Length Benchmark")) {
+        const char* methodNames[] =
+            {"EarClipping", "EarClippingTriangulator", "EarClippingTriangulatorFlipped", "CentroidFan", "Strip", "GreedyMaxArea", "MinWeight", "MaxMinArea", "MinMaxArea", "ConstrainedDelaunay", "ConstrainedDelaunayFlipped"};
+        
+        // Collect results for all methods
+        struct FastBenchResult {
+            double totalEdgeLength;
+            uint64_t helperSum;
+            double triangulationTimeMs;
+        };
+        FastBenchResult results[11];
+        
+        for (int methodIndex = 0; methodIndex < 11; methodIndex++) {
+            // Skip CentroidFan (index 3) as it modifies vertices
+            if (methodIndex == 3) continue;
+            
+            // Measure triangulation time
+            const uint64_t startTime = mach_absolute_time();
+            
+            // Reload geometry with current method
+            if (_shapeType == 0 && _currentSVGPath) {
+                reloadBlock(_currentSVGPath,
+                            (TriangulationMethod)methodIndex,
+                            _instanceGridCols,
+                            _instanceGridRows,
+                            _bezierMaxDeviationPx);
+            } else if (_shapeType == 1) {
+                ellipseBlock(_ellipseAxisRatio,
+                             _ellipseVertexCount,
+                             (TriangulationMethod)methodIndex,
+                             _instanceGridCols,
+                             _instanceGridRows);
+            }
+            
+            const uint64_t endTime = mach_absolute_time();
+            results[methodIndex].triangulationTimeMs = machTimeToMs(startTime, endTime);
+            
+            // Compute helper invocation
+            uint64_t helperSum = 0;
+            double helperRatio = 0.0;
+            [metrics computeHelperInvocationMetricsWithGeometry:geometry helperSum:&helperSum helperRatio:&helperRatio];
+            
+            // Calculate total edge length (matching Compute Tile Stats method)
+            const auto& baseVertices = geometry.currentVertices;
+            const auto& baseIndices = geometry.currentIndices;
+            double totalEdgeLength = 0.0;
+            if (!baseVertices.empty() && !baseIndices.empty()) {
+                // Expand vertices for all instances (same as Compute Tile Stats)
+                GridParams gp = geometry.gridParams;
+                const uint32_t cols = gp.cols;
+                const uint32_t rows = gp.rows;
+                const uint32_t instanceCount = cols * rows;
+                
+                std::vector<Vertex> expandedVertices;
+                std::vector<uint32_t> expandedIndices;
+                expandedVertices.reserve(baseVertices.size() * instanceCount);
+                expandedIndices.reserve(baseIndices.size() * instanceCount);
+                
+                for (uint32_t inst = 0; inst < instanceCount; ++inst) {
+                    const uint32_t col = inst % cols;
+                    const uint32_t row = inst / cols;
+                    const simd_float2 cellOrigin = simd_make_float2(col, row) * gp.cellSize + gp.origin;
+                    const uint32_t vertexOffset = (uint32_t)expandedVertices.size();
+                    
+                    for (const auto& v : baseVertices) {
+                        Vertex tv;
+                        simd_float2 local = simd_make_float2(v.position.x, v.position.y) * gp.scale;
+                        tv.position = simd_make_float3(cellOrigin.x + local.x, cellOrigin.y + local.y, v.position.z);
+                        expandedVertices.push_back(tv);
+                    }
+                    
+                    for (uint32_t idx : baseIndices) {
+                        expandedIndices.push_back(vertexOffset + idx);
+                    }
+                }
+                
+                // Use ComputeMeshMetrics to get unique edge length (same as Compute Tile Stats)
+                simd_int2 fb = {(int)_view.drawableSize.width, (int)_view.drawableSize.height};
+                simd_int2 tile = {(int)_tileSizePx, (int)_tileSizePx};
+                auto meshMetrics = TriangulationMetrics::ComputeMeshMetrics(expandedVertices, expandedIndices, fb, tile);
+                totalEdgeLength = meshMetrics.totalEdgeLength;
+            }
+            
+            results[methodIndex].totalEdgeLength = totalEdgeLength;
+            results[methodIndex].helperSum = helperSum;
+        }
+        
+        // Print all results in table format
+        printf("\nMethod\tTriangulationTimeMs\tTotalEdgeLength\tHelperSum\n");
+        for (int i = 0; i < 11; i++) {
+            if (i == 3) continue;  // Skip CentroidFan
+            printf("%s\t%.3f\t%.2f\t%llu\n", methodNames[i], results[i].triangulationTimeMs, results[i].totalEdgeLength, results[i].helperSum);
+        }
+        printf("\n");
+    }
+    
+    if (ImGui::Button("Triangulation Time Benchmark")) {
+        const char* methodNames[] =
+            {"EarClipping", "EarClippingTriangulator", "EarClippingTriangulatorFlipped", "CentroidFan", "Strip", "GreedyMaxArea", "MinWeight", "MaxMinArea", "MinMaxArea", "ConstrainedDelaunay", "ConstrainedDelaunayFlipped"};
+        
+        // Get current geometry
+        const auto& baseVertices = geometry.currentVertices;
+        if (baseVertices.empty()) {
+            printf("No geometry loaded. Please load an SVG or generate an ellipse first.\n");
+        } else {
+            const bool shouldHandleConcave = false;
+            const int numRuns = 100; // Run multiple times for more accurate measurement
+            
+            printf("\nMethod\tTimeMs (avg of %d runs)\n", numRuns);
+            
+            for (int methodIndex = 0; methodIndex < 11; methodIndex++) {
+                if (methodIndex == 3) continue;  // Skip CentroidFan
+                
+                // Warm up
+                std::vector<Vertex> testVerts = baseVertices;
+                std::vector<uint32_t> indices;
+                switch ((TriangulationMethod)methodIndex) {
+                    case TriangulationMethodEarClipping:
+                        indices = Triangulation::EarClippingTriangulation(testVerts);
+                        break;
+                    case TriangulationMethodEarClippingTriangulator:
+                        indices = Triangulation::EarClippingTriangulationMapbox(testVerts);
+                        break;
+                    case TriangulationMethodEarClippingTriangulatorFlipped:
+                        indices = Triangulation::EarClippingTriangulationMapboxFlipped(testVerts);
+                        break;
+                    case TriangulationMethodStrip:
+                        indices = Triangulation::StripTriangulation(testVerts);
+                        break;
+                    case TriangulationMethodGreedyMaxArea:
+                        indices = Triangulation::GreedyMaxAreaTriangulation(testVerts, shouldHandleConcave);
+                        break;
+                    case TriangulationMethodMinimumWeight:
+                        indices = Triangulation::MinimumWeightTriangulation(testVerts, shouldHandleConcave);
+                        break;
+                    case TriangulationMethodMaxMinArea:
+                        indices = Triangulation::MaxMinAreaTriangulation(testVerts, shouldHandleConcave);
+                        break;
+                    case TriangulationMethodMinMaxArea:
+                        indices = Triangulation::MinMaxAreaTriangulation(testVerts, shouldHandleConcave);
+                        break;
+                    case TriangulationMethodConstrainedDelaunay:
+                        indices = Triangulation::ConstrainedDelaunayTriangulation(testVerts);
+                        break;
+                    case TriangulationMethodConstrainedDelaunayFlipped:
+                        indices = Triangulation::ConstrainedDelaunayTriangulation_Flipped(testVerts);
+                        break;
+                    default:
+                        break;
+                }
+                
+                // Measure triangulation time (average of multiple runs)
+                uint64_t totalTicks = 0;
+                for (int run = 0; run < numRuns; run++) {
+                    testVerts = baseVertices;
+                    const uint64_t startTime = mach_absolute_time();
+                    switch ((TriangulationMethod)methodIndex) {
+                        case TriangulationMethodEarClipping:
+                            indices = Triangulation::EarClippingTriangulation(testVerts);
+                            break;
+                        case TriangulationMethodEarClippingTriangulator:
+                            indices = Triangulation::EarClippingTriangulationMapbox(testVerts);
+                            break;
+                        case TriangulationMethodEarClippingTriangulatorFlipped:
+                            indices = Triangulation::EarClippingTriangulationMapboxFlipped(testVerts);
+                            break;
+                        case TriangulationMethodStrip:
+                            indices = Triangulation::StripTriangulation(testVerts);
+                            break;
+                        case TriangulationMethodGreedyMaxArea:
+                            indices = Triangulation::GreedyMaxAreaTriangulation(testVerts, shouldHandleConcave);
+                            break;
+                        case TriangulationMethodMinimumWeight:
+                            indices = Triangulation::MinimumWeightTriangulation(testVerts, shouldHandleConcave);
+                            break;
+                        case TriangulationMethodMaxMinArea:
+                            indices = Triangulation::MaxMinAreaTriangulation(testVerts, shouldHandleConcave);
+                            break;
+                        case TriangulationMethodMinMaxArea:
+                            indices = Triangulation::MinMaxAreaTriangulation(testVerts, shouldHandleConcave);
+                            break;
+                        case TriangulationMethodConstrainedDelaunay:
+                            indices = Triangulation::ConstrainedDelaunayTriangulation(testVerts);
+                            break;
+                        case TriangulationMethodConstrainedDelaunayFlipped:
+                            indices = Triangulation::ConstrainedDelaunayTriangulation_Flipped(testVerts);
+                            break;
+                        default:
+                            break;
+                    }
+                    const uint64_t endTime = mach_absolute_time();
+                    totalTicks += (endTime - startTime);
+                }
+                
+                const double avgTimeMs = machTimeToMs(0, totalTicks) / numRuns;
+                printf("%s\t%.3f\n", methodNames[methodIndex], avgTimeMs);
+            }
+            printf("\n");
+        }
+    }
+    
     // Benchmark all triangulation methods
     if (!_benchmarkRunning) {
         if (ImGui::Button("Benchmark All Methods")) {
@@ -431,8 +650,9 @@
             memset(_benchmarkResults, 0, sizeof(_benchmarkResults));
         }
     } else {
-        int displayIndex = _benchmarkMethodIndex > 2 ? _benchmarkMethodIndex : _benchmarkMethodIndex + 1;
-        ImGui::Text("Benchmarking method %d/7, phase %d...", displayIndex, _benchmarkPhase);
+        // Display 1-based index, accounting for skipped CentroidFan (index 3)
+        int displayIndex = _benchmarkMethodIndex < 3 ? _benchmarkMethodIndex + 1 : _benchmarkMethodIndex;
+        ImGui::Text("Benchmarking method %d/10, phase %d...", displayIndex, _benchmarkPhase);
     }
     ImGui::End();
     
@@ -487,6 +707,11 @@
         case VisualizationModeOverdraw:
             [encoder setRenderPipelineState:_overdrawPipeline];
             [encoder setTriangleFillMode:MTLTriangleFillModeFill];
+            break;
+            
+        case VisualizationModePrintFriendly:
+            [encoder setRenderPipelineState:_printFriendlyPipeline];
+            [encoder setTriangleFillMode:MTLTriangleFillModeLines];
             break;
     }
     
@@ -565,11 +790,11 @@
                         ellipseBlock:(void(^)(float, int, TriangulationMethod, uint32_t, uint32_t))ellipseBlock {
     
     const char* methodNames[] =
-        {"EarClipping", "MinWeight", "CentroidFan", "GreedyMaxArea", "Strip", "MaxMinArea", "MinMaxArea", "ConstrainedDelaunay"};
+        {"EarClipping", "EarClippingTriangulator", "EarClippingTriangulatorFlipped", "CentroidFan", "Strip", "GreedyMaxArea", "MinWeight", "MaxMinArea", "MinMaxArea", "ConstrainedDelaunay", "ConstrainedDelaunayFlipped"};
 
     // Skip CentroidFan it modifies vertices which breaks metrics
-    if (_benchmarkMethodIndex == 2) {
-        _benchmarkMethodIndex = 3;
+    if (_benchmarkMethodIndex == 3) {
+        _benchmarkMethodIndex = 4;
     }
     
     switch (_benchmarkPhase) {
@@ -666,11 +891,11 @@
                 r.triCount = _hasMeshMetrics ? _lastMeshMetrics.triangleCount : 0;
                 
                 _benchmarkMethodIndex++;
-                if (_benchmarkMethodIndex >= 8) {
+                if (_benchmarkMethodIndex >= 11) {
                     // Done - print results
                     printf("\nMethod\tTriCount\tTotalEdgeLength\tHelperSum\tHelperRatio\tTris/Tile Mean\tTris/Tile Med\tTris/Tile P95\tTiles/Tri Mean\tTiles/Tri Med\tTiles/Tri P95\tFrametime Mean\tFrametime Med\tFrametime Dev\n");
-                    for (int i = 0; i < 8; i++) {
-                        if (i == 2) continue;  // Skip CentroidFan
+                    for (int i = 0; i < 11; i++) {
+                        if (i == 3) continue;  // Skip CentroidFan
                         BenchmarkResult& br = _benchmarkResults[i];
                         printf("%s\t%zu\t%.2f\t%llu\t%.3f\t%.2f\t%.2f\t%.2f\t%.2f\t%.2f\t%.2f\t%.3f\t%.3f\t%.3f\n",
                                methodNames[i], br.triCount, br.totalEdgeLength, br.helperSum, br.helperRatio,

@@ -14,16 +14,10 @@
 #include <cstdint>
 
 namespace Triangulation {
-
-double calculateTotalEdgeLength(const std::vector<Vertex>& vertices,
-                                const std::vector<uint32_t>& indices);
-
-// MARK: - Polygon Triangulation Methods
-
 // Simple algorithms without specific optimisation target
 std::vector<uint32_t> EarClippingTriangulation(const std::vector<Vertex>& vertices);
-std::vector<uint32_t> EarClippingTriangulation_Triangulator(const std::vector<Vertex>& vertices);
-std::vector<uint32_t> EarClippingTriangulation_Triangulator_Flipped(const std::vector<Vertex>& vertices);
+std::vector<uint32_t> EarClippingTriangulationMapbox(const std::vector<Vertex>& vertices);
+std::vector<uint32_t> EarClippingTriangulationMapboxFlipped(const std::vector<Vertex>& vertices);
 std::vector<uint32_t> CentroidFanTriangulation(std::vector<Vertex>& vertices);
 std::vector<uint32_t> StripTriangulation(const std::vector<Vertex>& vertices);
 

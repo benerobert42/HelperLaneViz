@@ -62,3 +62,8 @@ fragment float4 wireframeFS(MainVSOut in [[stage_in]]) {
     // Simple white wireframe
     return float4(1.0, 1.0, 1.0, 1.0);
 }
+
+fragment float4 printFriendlyFS(MainVSOut in [[stage_in]]) {
+    // Red wireframe for print-friendly mode
+    return float4(1.0, 0.0, 0.0, 1.0);
+}
