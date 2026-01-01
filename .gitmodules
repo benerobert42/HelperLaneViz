@@ -10,3 +10,12 @@
 [submodule "HelperLaneViz/ThirdParty/Triangulator"]
 	path = HelperLaneViz/ThirdParty/Triangulator
 	url = https://github.com/scline6/Triangulator.git
+[submodule "external/earcut"]
+	path = external/earcut
+	url = https://github.com/mapbox/earcut.hpp.git
+[submodule "external/nanosvg"]
+	path = external/nanosvg
+	url = https://github.com/memononen/nanosvg.git
+[submodule "external/triangle"]
+	path = external/triangle
+	url = https://github.com/libigl/triangle.git

@@ -15,7 +15,6 @@
 
 #include <Eigen/Core>
 #include <igl/triangle/triangulate.h>
-#include "triangulator.h"
 #include <mapbox/earcut.hpp>
 
 namespace Triangulation {

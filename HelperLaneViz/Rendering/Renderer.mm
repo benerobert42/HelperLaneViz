@@ -9,6 +9,7 @@
 #import "GeometryManager.h"
 #import "MetricsComputer.h"
 #import "RenderingManager.h"
+#import "DebugRenderer.h"
 #import "Measurements/GPUFrameTimer.h"
 
 #import <MetalKit/MetalKit.h>
@@ -116,25 +117,44 @@
 - (void)drawInMTKView:(MTKView *)view {
     id<MTLCommandBuffer> commandBuffer = [_commandQueue commandBuffer];
     
-    // Render UI (may return NO to skip frame, e.g. on MSAA change)
-    BOOL shouldRender = [_renderingManager renderUIWithGeometry:_geometryManager
-                                                        metrics:_metricsComputer
-                                               onGeometryReload:^(NSString *path,
-                                                                  TriangulationMethod method,
-                                                                  uint32_t cols,
-                                                                  uint32_t rows,
-                                                                  float bezierDev) {
+    MTLRenderPassDescriptor *renderPassDescriptor = view.currentRenderPassDescriptor;
+    if (!renderPassDescriptor) {
+        [commandBuffer commit];
+        return;
+    }
+    
+    DebugRenderer *debugRenderer = [_renderingManager debugRenderer];
+    
+    // Update display size for ImGUI
+    [debugRenderer updateDisplaySize:view.bounds.size];
+    
+    // Start ImGUI frame (may return NO to skip frame, e.g. on MSAA change)
+    BOOL shouldRender = [debugRenderer newFrameWithRenderPassDescriptor:renderPassDescriptor];
+    
+    if (!shouldRender) {
+        [commandBuffer commit];
+        return;
+    }
+    
+    // Render UI
+    [debugRenderer renderUIWithGeometry:_geometryManager
+                                metrics:_metricsComputer
+                        onGeometryReload:^(NSString *path,
+                                          TriangulationMethod method,
+                                          uint32_t cols,
+                                          uint32_t rows,
+                                          float bezierDev) {
         [self->_geometryManager loadSVGFromPath:path
                             triangulationMethod:method
                                instanceGridCols:cols
                                        gridRows:rows
                            bezierMaxDeviationPx:bezierDev];
     }
-                                                onEllipseReload:^(float axisRatio,
-                                                                  int vertexCount,
-                                                                  TriangulationMethod method,
-                                                                  uint32_t cols,
-                                                                  uint32_t rows) {
+                         onEllipseReload:^(float axisRatio,
+                                          int vertexCount,
+                                          TriangulationMethod method,
+                                          uint32_t cols,
+                                          uint32_t rows) {
         [self->_geometryManager generateEllipseWithAxisRatio:axisRatio
                                                  vertexCount:vertexCount
                                          triangulationMethod:method
@@ -142,19 +162,8 @@
                                                     gridRows:rows];
     }];
     
-    if (!shouldRender) {
-        [commandBuffer commit];
-        return;
-    }
-    
-    MTLRenderPassDescriptor *renderPassDescriptor = view.currentRenderPassDescriptor;
-    if (!renderPassDescriptor) {
-        [commandBuffer commit];
-        return;
-    }
-    
     // Set white background for print-friendly mode
-    if (_renderingManager.visualizationMode == VisualizationModePrintFriendly) {
+    if (debugRenderer.visualizationMode == VisualizationModePrintFriendly) {
         renderPassDescriptor.colorAttachments[0].clearColor = MTLClearColorMake(1, 1, 1, 1);
     }
     
@@ -163,12 +172,12 @@
     // Encode geometry rendering
     [_renderingManager encodeGeometryWithEncoder:encoder
                                          geometry:_geometryManager
-                                             mode:_renderingManager.visualizationMode];
+                                             mode:debugRenderer.visualizationMode];
 
     // Draw grid overlay if enabled (not shown during overdraw or print-friendly mode)
-    if (_renderingManager.showGridOverlay && 
-        _renderingManager.visualizationMode != VisualizationModeOverdraw &&
-        _renderingManager.visualizationMode != VisualizationModePrintFriendly) {
+    if (debugRenderer.showGridOverlay && 
+        debugRenderer.visualizationMode != VisualizationModeOverdraw &&
+        debugRenderer.visualizationMode != VisualizationModePrintFriendly) {
         [_renderingManager encodeGridOverlayWithEncoder:encoder drawableSize:view.drawableSize];
     }
     
@@ -176,13 +185,13 @@
     [encoder setTriangleFillMode:MTLTriangleFillModeFill];
     
     // Render ImGUI on top of everything
-    [_renderingManager renderImGUIWithCommandBuffer:commandBuffer commandEncoder:encoder];
+    [debugRenderer renderDrawDataWithCommandBuffer:commandBuffer commandEncoder:encoder];
 
     [encoder endEncoding];
     [commandBuffer presentDrawable:view.currentDrawable];
     
     // Record GPU frame time (actual GPU execution: GPUEndTime - GPUStartTime)
-    GPUFrameTimer *gpuFrameTimer = (GPUFrameTimer *)[_renderingManager gpuFrameTimer];
+    GPUFrameTimer *gpuFrameTimer = (GPUFrameTimer *)[debugRenderer gpuFrameTimer];
     if (gpuFrameTimer && gpuFrameTimer->isActive()) {
         [commandBuffer addCompletedHandler:^(id<MTLCommandBuffer> buffer) {
             gpuFrameTimer->recordGPUEndTime(buffer.GPUStartTime, buffer.GPUEndTime);
