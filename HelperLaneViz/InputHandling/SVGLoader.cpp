@@ -153,8 +153,7 @@ bool SVGLoader::TessellateSvgToMesh(const std::string& filePath,
                                     std::vector<Vertex>& outPositions,
                                     std::vector<uint32_t>& outIndices,
                                     Triangulator triangulator,
-                                    float bezierMaxDeviationPx)
-{
+                                    float bezierMaxDeviationPx) {
     outPositions.clear();
     outIndices.clear();
     

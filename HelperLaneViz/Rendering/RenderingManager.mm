@@ -19,24 +19,19 @@
     id<MTLDevice> _device;
     MTKView *_view;
     
-    // Render pipelines
     id<MTLRenderPipelineState> _mainPipeline;
     id<MTLRenderPipelineState> _wireframePipeline;
     id<MTLRenderPipelineState> _overdrawPipeline;
     id<MTLRenderPipelineState> _printFriendlyPipeline;
     id<MTLRenderPipelineState> _gridOverlayPipeline;
     
-    // Grid overlay
     GridOverlay *_gridOverlay;
     
-    // Helper lane engagement
     id<MTLTexture> _helperLaneTexture;
     id<MTLSamplerState> _pointSampler;
     
-    // Debug renderer (handles all ImGUI UI)
     DebugRenderer *_debugRenderer;
     
-    // Track sample count to detect changes
     NSInteger _lastSampleCount;
 }
 
@@ -51,7 +46,6 @@
     [self setupGridOverlay];
     [self setupHelperLaneResources];
     
-    // Initialize DebugRenderer (handles all ImGUI UI)
     _debugRenderer = [[DebugRenderer alloc] initWithDevice:_device view:view];
     
     return self;
@@ -82,7 +76,6 @@
 }
 
 - (void)updatePipelinesForCurrentSampleCount {
-    // Check if sample count has changed
     NSInteger currentSampleCount = _view.sampleCount;
     if (currentSampleCount != _lastSampleCount) {
         _lastSampleCount = currentSampleCount;

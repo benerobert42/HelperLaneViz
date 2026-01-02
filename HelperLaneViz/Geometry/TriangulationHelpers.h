@@ -17,6 +17,8 @@ double PolygonSignedArea(const std::vector<Vertex>& vertices);
 bool IsCounterClockwise(const std::vector<Vertex>& vertices, uint32_t indexA, uint32_t indexB, uint32_t indexC);
 std::vector<uint32_t> BuildCCWOrder(const std::vector<Vertex>& vertices);
 
+bool IsConvexQuad(const std::vector<Vertex>& vertices, uint32_t a, uint32_t b, uint32_t c, uint32_t d);
+
 bool PointInTriangle(const simd_float3& p,
                      const simd_float3& a,
                      const simd_float3& b,

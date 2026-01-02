@@ -13,10 +13,10 @@
 @class MetricsComputer;
 
 typedef NS_ENUM(NSInteger, VisualizationMode) {
-    VisualizationModeHelperLane, // Helper lane visualization (default)
-    VisualizationModeWireframe, // Wireframe with fill mode lines
-    VisualizationModeOverdraw, // Overdraw visualization
-    VisualizationModePrintFriendly // Print friendly: white background, red wireframe, no grid
+    VisualizationModeHelperLane,
+    VisualizationModeWireframe,
+    VisualizationModeOverdraw,
+    VisualizationModePrintFriendly
 };
 
 NS_ASSUME_NONNULL_BEGIN
@@ -25,7 +25,6 @@ NS_ASSUME_NONNULL_BEGIN
 
 - (instancetype)initWithDevice:(id<MTLDevice>)device view:(MTKView *)view;
 
-// Update display size (call when view size changes)
 - (void)updateDisplaySize:(CGSize)size;
 
 // Start a new ImGUI frame (call before rendering UI)

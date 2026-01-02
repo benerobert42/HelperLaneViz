@@ -20,27 +20,6 @@
 namespace Triangulation {
 
 // MARK: Simple triangulations
-static inline double Orient2D(const Vertex& a, const Vertex& b, const Vertex& c) {
-    const double ax = a.position.x, ay = a.position.y;
-    const double bx = b.position.x, by = b.position.y;
-    const double cx = c.position.x, cy = c.position.y;
-    return (bx-ax)*(cy-ay) - (by-ay)*(cx-ax);
-}
-
-static inline bool IsConvexQuad(const std::vector<Vertex>& V,
-                                uint32_t a, uint32_t b, uint32_t c, uint32_t d) {
-    // a and b must be on opposite sides of cd, and c and d opposite sides of ab
-    const double o1 = Orient2D(V[a], V[b], V[c]);
-    const double o2 = Orient2D(V[a], V[b], V[d]);
-    if (o1 == 0.0 || o2 == 0.0 || ((o1 > 0) == (o2 > 0))) return false;
-
-    const double o3 = Orient2D(V[c], V[d], V[a]);
-    const double o4 = Orient2D(V[c], V[d], V[b]);
-    if (o3 == 0.0 || o4 == 0.0 || ((o3 > 0) == (o4 > 0))) return false;
-
-    return true;
-}
-
 struct EdgeKey {
     uint32_t a;
     uint32_t b;
@@ -191,7 +170,7 @@ std::vector<uint32_t> OptimizeByMinLengthFlips_PQ(const std::vector<Vertex>& ver
         const uint32_t c = E.opp0;
         const uint32_t d = E.opp1;
 
-        if (!IsConvexQuad(vertices, a, b, c, d)) {
+        if (!Helpers::IsConvexQuad(vertices, a, b, c, d)) {
             return;
         }
 
@@ -253,7 +232,7 @@ std::vector<uint32_t> OptimizeByMinLengthFlips_PQ(const std::vector<Vertex>& ver
         const int t1 = E.t1;
 
         // Re-check (neighbors may have moved but ver guard usually catches)
-        if (!IsConvexQuad(vertices, a, b, c, d)) {
+        if (!Helpers::IsConvexQuad(vertices, a, b, c, d)) {
             continue;
         }
 
@@ -297,8 +276,8 @@ std::vector<uint32_t> OptimizeByMinLengthFlips_PQ(const std::vector<Vertex>& ver
     return indices;
 }
 
-std::vector<uint32_t> EarClippingTriangulation(const std::vector<Vertex>& vertices) {
-    std::vector<uint32_t> indices;
+Indices EarClipping(const std::vector<Vertex>& vertices) {
+    Indices indices;
     const size_t n = vertices.size();
 
     if (n < 3) return indices;
@@ -348,8 +327,8 @@ std::vector<uint32_t> EarClippingTriangulation(const std::vector<Vertex>& vertic
     return indices;
 }
 
-std::vector<uint32_t> EarClippingTriangulationMapbox(const std::vector<Vertex>& vertices) {
-    std::vector<uint32_t> indices;
+Indices EarClippingMapbox(const std::vector<Vertex>& vertices) {
+    Indices indices;
     const size_t n = vertices.size();
     if (n < 3) {
         return indices;
@@ -374,15 +353,14 @@ std::vector<uint32_t> EarClippingTriangulationMapbox(const std::vector<Vertex>& 
     return indices;
 }
 
-std::vector<uint32_t> EarClippingTriangulationMapboxFlipped(const std::vector<Vertex>& vertices) {
-    std::vector<uint32_t> indices;
+Indices EarClippingMapboxWithEdgeFlips(const std::vector<Vertex>& vertices) {
+    Indices indices;
     const size_t n = vertices.size();
     if (n < 3) {
         return indices;
     }
 
-    // Convert Vertex format to earcut format (std::vector<std::vector<Point>>)
-    // earcut expects: std::vector<std::vector<std::array<Coord, 2>>>
+    // Convert Vertex format to earcut format (std::vector<std::vector<std::array<Coord, 2>>>)
     using Point = std::array<double, 2>;
     std::vector<std::vector<Point>> polygon;
     
@@ -394,15 +372,13 @@ std::vector<uint32_t> EarClippingTriangulationMapboxFlipped(const std::vector<Ve
     }
     polygon.push_back(std::move(contour));
 
-    // Run earcut triangulation
-    // Returns array of indices that refer to the vertices of the input polygon
     indices = mapbox::earcut<uint32_t>(polygon);
     indices = OptimizeByMinLengthFlips_PQ(vertices, indices);
     return indices;
 }
 
-std::vector<uint32_t> CentroidFanTriangulation(std::vector<Vertex>& vertices) {
-    std::vector<uint32_t> indices;
+Indices CentroidFan(std::vector<Vertex>& vertices) {
+    Indices indices;
     const size_t originalVertexCount = vertices.size();
 
     if (originalVertexCount < 3) {
@@ -436,8 +412,8 @@ std::vector<uint32_t> CentroidFanTriangulation(std::vector<Vertex>& vertices) {
     return indices;
 }
 
-std::vector<uint32_t> StripTriangulation(const std::vector<Vertex>& vertices) {
-    std::vector<uint32_t> indices;
+Indices Strip(const std::vector<Vertex>& vertices) {
+    Indices indices;
     const size_t vertexCount = vertices.size();
 
     if (vertexCount < 3) {
@@ -467,10 +443,9 @@ std::vector<uint32_t> StripTriangulation(const std::vector<Vertex>& vertices) {
 }
 
 // MARK: DP triangulations
-std::vector<uint32_t> MinimumWeightTriangulation(const std::vector<Vertex>& vertices,
-                                                 bool shouldHandleConcave) {
-    std::vector<uint32_t> indices;
-    const int vertexCount = static_cast<int>(vertices.size());
+Indices MinimumWeight(const std::vector<Vertex>& vertices, bool shouldHandleConcave) {
+    Indices indices;
+    const int vertexCount = static_cast<uint32_t>(vertices.size());
     if (vertexCount < 3) {
         return indices;
     }
@@ -571,9 +546,8 @@ std::vector<uint32_t> MinimumWeightTriangulation(const std::vector<Vertex>& vert
     return indices;
 }
 
-std::vector<uint32_t> MaxMinAreaTriangulation(const std::vector<Vertex>& vertices,
-                                              bool shouldHandleConcave) {
-    std::vector<uint32_t> indices;
+Indices MaxMinArea(const std::vector<Vertex>& vertices, bool shouldHandleConcave) {
+    Indices indices;
     const int vertexCount = static_cast<int>(vertices.size());
     if (vertexCount < 3) {
         return indices;
@@ -655,9 +629,8 @@ std::vector<uint32_t> MaxMinAreaTriangulation(const std::vector<Vertex>& vertice
     return indices;
 }
 
-std::vector<uint32_t> MinMaxAreaTriangulation(const std::vector<Vertex>& vertices,
-                                              bool shouldHandleConcave) {
-    std::vector<uint32_t> indices;
+Indices MinMaxArea(const std::vector<Vertex>& vertices, bool shouldHandleConcave) {
+    Indices indices;
     const int vertexCount = static_cast<int>(vertices.size());
     if (vertexCount < 3) {
         return indices;
@@ -736,8 +709,8 @@ std::vector<uint32_t> MinMaxAreaTriangulation(const std::vector<Vertex>& vertice
 }
 
 // MARK: Max Area and CDT
-std::vector<uint32_t> GreedyMaxAreaTriangulation(const std::vector<Vertex>& vertices, bool shouldHandleConcave) {
-    std::vector<uint32_t> indices;
+Indices GreedyMaxArea(const std::vector<Vertex>& vertices, bool shouldHandleConcave) {
+    Indices indices;
     const size_t vertexCount = vertices.size();
     const auto diagTable = Helpers::BuildDiagonalTable(vertices);
 
@@ -880,7 +853,7 @@ std::vector<uint32_t> GreedyMaxAreaTriangulation(const std::vector<Vertex>& vert
 }
 
 
-std::vector<uint32_t> ConstrainedDelaunayTriangulation(const std::vector<Vertex>& vertices) {
+Indices ConstrainedDelaunay(const std::vector<Vertex>& vertices) {
     const int vertexCount = static_cast<int>(vertices.size());
     
     // Prepare vertex matrix for libigl
@@ -910,7 +883,7 @@ std::vector<uint32_t> ConstrainedDelaunayTriangulation(const std::vector<Vertex>
                                outputVertices, outputFaces);
     
     // Convert face matrix to flat index array
-    std::vector<uint32_t> triangleIndices;
+    Indices triangleIndices;
     triangleIndices.reserve(static_cast<size_t>(outputFaces.rows()) * 3);
     
     for (int faceIndex = 0; faceIndex < outputFaces.rows(); ++faceIndex) {
@@ -922,7 +895,7 @@ std::vector<uint32_t> ConstrainedDelaunayTriangulation(const std::vector<Vertex>
     return triangleIndices;
 }
 
-std::vector<uint32_t> ConstrainedDelaunayTriangulation_Flipped(const std::vector<Vertex>& vertices) {
+Indices ConstrainedDelaunayWithEdgeFlips(const std::vector<Vertex>& vertices) {
     const int vertexCount = static_cast<int>(vertices.size());
 
     // Prepare vertex matrix for libigl
@@ -952,7 +925,7 @@ std::vector<uint32_t> ConstrainedDelaunayTriangulation_Flipped(const std::vector
                                outputVertices, outputFaces);
 
     // Convert face matrix to flat index array
-    std::vector<uint32_t> triangleIndices;
+    Indices triangleIndices;
     triangleIndices.reserve(static_cast<size_t>(outputFaces.rows()) * 3);
 
     for (int faceIndex = 0; faceIndex < outputFaces.rows(); ++faceIndex) {

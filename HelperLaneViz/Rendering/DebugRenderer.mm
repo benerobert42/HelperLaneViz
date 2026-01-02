@@ -17,12 +17,10 @@
 #import <AppKit/AppKit.h>
 #include <mach/mach_time.h>
 
-// ImGUI includes - use directly as external library (following best practices)
 #include "../../external/imgui/imgui.h"
 #include "../../external/imgui/backends/imgui_impl_metal.h"
 #include "../../external/imgui/backends/imgui_impl_osx.h"
 
-// Low-overhead timing utility using mach_absolute_time (nanosecond precision, minimal overhead)
 static inline double machTimeToMs(uint64_t start, uint64_t end) {
     static mach_timebase_info_data_t timebase = {0};
     if (timebase.denom == 0) {

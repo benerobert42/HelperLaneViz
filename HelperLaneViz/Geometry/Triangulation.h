@@ -13,31 +13,23 @@
 #include <vector>
 #include <cstdint>
 
+using Indices = std::vector<uint32_t>;
+
 namespace Triangulation {
-// Simple algorithms without specific optimisation target
-std::vector<uint32_t> EarClippingTriangulation(const std::vector<Vertex>& vertices);
-std::vector<uint32_t> EarClippingTriangulationMapbox(const std::vector<Vertex>& vertices);
-std::vector<uint32_t> EarClippingTriangulationMapboxFlipped(const std::vector<Vertex>& vertices);
-std::vector<uint32_t> CentroidFanTriangulation(std::vector<Vertex>& vertices);
-std::vector<uint32_t> StripTriangulation(const std::vector<Vertex>& vertices);
+Indices EarClipping(const std::vector<Vertex>& vertices);
+Indices EarClippingMapbox(const std::vector<Vertex>& vertices);
+Indices EarClippingMapboxWithEdgeFlips(const std::vector<Vertex>& vertices);
 
-std::vector<uint32_t> GreedyMaxAreaTriangulation(const std::vector<Vertex>& vertices,
-                                                 bool shouldHandleConcave = false);
+Indices CentroidFan(std::vector<Vertex>& vertices);
+Indices Strip(const std::vector<Vertex>& vertices);
 
-std::vector<uint32_t> MinimumWeightTriangulation(const std::vector<Vertex>& vertices,
-                                                 bool shouldHandleConcave = false);
+Indices GreedyMaxArea(const std::vector<Vertex>& vertices, bool shouldHandleConcave = false);
 
-// Maximizes the minimum triangle area (max-min optimization).
-std::vector<uint32_t> MaxMinAreaTriangulation(const std::vector<Vertex>& vertices,
-                                              bool shouldHandleConcave = false);
+Indices MinimumWeight(const std::vector<Vertex>& vertices, bool shouldHandleConcave = false);
+Indices MaxMinArea(const std::vector<Vertex>& vertices, bool shouldHandleConcave = false);
+Indices MinMaxArea(const std::vector<Vertex>& vertices, bool shouldHandleConcave = false);
 
-// Minimizes the maximum triangle area (min-max optimization).
-std::vector<uint32_t> MinMaxAreaTriangulation(const std::vector<Vertex>& vertices,
-                                              bool shouldHandleConcave = false);
-
-// libigl's Triangle library wrapper based Constrained Delaunay Triangulation.
-std::vector<uint32_t> ConstrainedDelaunayTriangulation(const std::vector<Vertex>& vertices);
-
-std::vector<uint32_t> ConstrainedDelaunayTriangulation_Flipped(const std::vector<Vertex>& vertices);
+Indices ConstrainedDelaunay(const std::vector<Vertex>& vertices);
+Indices ConstrainedDelaunayWithEdgeFlips(const std::vector<Vertex>& vertices);
 
 } // namespace Triangulation

@@ -185,47 +185,47 @@
     
     switch (method) {
         case TriangulationMethodEarClipping:
-            indices = Triangulation::EarClippingTriangulation(mutableVerts);
+            indices = Triangulation::EarClipping(mutableVerts);
             break;
             
         case TriangulationMethodEarClippingTriangulator:
-            indices = Triangulation::EarClippingTriangulationMapbox(mutableVerts);
+            indices = Triangulation::EarClippingMapbox(mutableVerts);
             break;
             
         case TriangulationMethodEarClippingTriangulatorFlipped:
-            indices = Triangulation::EarClippingTriangulationMapboxFlipped(mutableVerts);
+            indices = Triangulation::EarClippingMapboxWithEdgeFlips(mutableVerts);
             break;
             
         case TriangulationMethodCentroidFan:
-            indices = Triangulation::CentroidFanTriangulation(mutableVerts);
+            indices = Triangulation::CentroidFan(mutableVerts);
             break;
             
         case TriangulationMethodStrip:
-            indices = Triangulation::StripTriangulation(mutableVerts);
+            indices = Triangulation::Strip(mutableVerts);
             break;
             
         case TriangulationMethodGreedyMaxArea:
-            indices = Triangulation::GreedyMaxAreaTriangulation(mutableVerts, shouldHandleConcave);
+            indices = Triangulation::GreedyMaxArea(mutableVerts, shouldHandleConcave);
             break;
             
         case TriangulationMethodMinimumWeight:
-            indices = Triangulation::MinimumWeightTriangulation(mutableVerts, shouldHandleConcave);
+            indices = Triangulation::MinimumWeight(mutableVerts, shouldHandleConcave);
             break;
             
         case TriangulationMethodMaxMinArea:
-            indices = Triangulation::MaxMinAreaTriangulation(mutableVerts, shouldHandleConcave);
+            indices = Triangulation::MaxMinArea(mutableVerts, shouldHandleConcave);
             break;
             
         case TriangulationMethodMinMaxArea:
-            indices = Triangulation::MinMaxAreaTriangulation(mutableVerts, shouldHandleConcave);
+            indices = Triangulation::MinMaxArea(mutableVerts, shouldHandleConcave);
             break;
             
         case TriangulationMethodConstrainedDelaunay:
-            indices = Triangulation::ConstrainedDelaunayTriangulation(mutableVerts);
+            indices = Triangulation::ConstrainedDelaunay(mutableVerts);
             break;
             
         case TriangulationMethodConstrainedDelaunayFlipped:
-            indices = Triangulation::ConstrainedDelaunayTriangulation_Flipped(mutableVerts);
+            indices = Triangulation::ConstrainedDelaunayWithEdgeFlips(mutableVerts);
             break;
     }
     

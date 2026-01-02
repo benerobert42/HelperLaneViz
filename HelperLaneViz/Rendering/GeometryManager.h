@@ -33,21 +33,18 @@ NS_ASSUME_NONNULL_BEGIN
 
 - (instancetype)initWithDevice:(id<MTLDevice>)device;
 
-// Load SVG and triangulate with specified method
 - (BOOL)loadSVGFromPath:(NSString *)path
     triangulationMethod:(TriangulationMethod)method
        instanceGridCols:(uint32_t)cols
                gridRows:(uint32_t)rows
     bezierMaxDeviationPx:(float)bezierMaxDeviationPx;
 
-// Generate ellipse geometry with given axis ratio (minorAxis/majorAxis)
 - (BOOL)generateEllipseWithAxisRatio:(float)axisRatio
                          vertexCount:(int)vertexCount
                  triangulationMethod:(TriangulationMethod)method
                     instanceGridCols:(uint32_t)cols
                             gridRows:(uint32_t)rows;
 
-// Update viewport size (called when view size changes)
 - (void)updateViewportSize:(vector_uint2)size;
 
 // Accessors for geometry data

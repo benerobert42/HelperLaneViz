@@ -68,6 +68,32 @@ bool Triangulation::Helpers::IsCounterClockwise(const std::vector<Vertex>& verti
     return result > 0.0;
 }
 
+bool Triangulation::Helpers::IsConvexQuad(const std::vector<Vertex>& vertices,
+                                          uint32_t indexA,
+                                          uint32_t indexB,
+                                          uint32_t indexC,
+                                          uint32_t indexD) {
+    simd_float3 posA = vertices[indexA].position;
+    simd_float3 posB = vertices[indexB].position;
+    simd_float3 posC = vertices[indexC].position;
+    simd_float3 posD = vertices[indexD].position;
+
+    // a and b must be on opposite sides of cd, and c and d opposite sides of ab
+    const double o1 = Helpers::Cross2D(posA, posB, posC);
+    const double o2 = Helpers::Cross2D(posA, posB, posD);
+    if (o1 == 0.0 || o2 == 0.0 || ((o1 > 0) == (o2 > 0))) {
+        return false;
+    }
+
+    const double o3 = Helpers::Cross2D(posC, posD, posA);
+    const double o4 = Helpers::Cross2D(posC, posD, posB);
+    if (o3 == 0.0 || o4 == 0.0 || ((o3 > 0) == (o4 > 0))) {
+        return false;
+    }
+
+    return true;
+}
+
 // Build vertex ordering for CCW traversal (reverses if input is CW)
 std::vector<uint32_t> Triangulation::Helpers::BuildCCWOrder(const std::vector<Vertex>& vertices) {
     const size_t vertexCount = vertices.size();
