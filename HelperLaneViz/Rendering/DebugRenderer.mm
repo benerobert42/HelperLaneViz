@@ -84,6 +84,10 @@ static inline double machTimeToMs(uint64_t start, uint64_t end) {
     };
     BenchmarkResult _benchmarkResults[11];  // One per triangulation method
     
+    // Batch benchmark state
+    NSArray<NSString *> *_batchFiles;  // Array of SVG file paths
+    int _batchFileIndex;  // Current file being benchmarked
+    
     // Display size tracking
     CGSize _displaySize;
 }
@@ -284,11 +288,8 @@ static inline double machTimeToMs(uint64_t start, uint64_t end) {
             gridChanged = true;
         }
         if (gridChanged) {
-            if (_shapeType == 0 && _currentSVGPath) {
-                reloadBlock(_currentSVGPath, _currentTriangulationMethod, _instanceGridCols, _instanceGridRows, _bezierMaxDeviationPx);
-            } else if (_shapeType == 1) {
-                ellipseBlock(_ellipseAxisRatio, _ellipseVertexCount, _currentTriangulationMethod, _instanceGridCols, _instanceGridRows);
-            }
+            // Update grid without reloading geometry (fast)
+            [geometry updateInstanceGridWithCols:_instanceGridCols rows:_instanceGridRows];
         }
     }
     
@@ -420,12 +421,25 @@ static inline double machTimeToMs(uint64_t start, uint64_t end) {
             _benchmarkRunning = YES;
             _benchmarkMethodIndex = 0;
             _benchmarkPhase = 0;
+            _batchFiles = nil;
+            _batchFileIndex = -1;
             memset(_benchmarkResults, 0, sizeof(_benchmarkResults));
         }
+        ImGui::SameLine();
+        if (ImGui::Button("Benchmark Folder")) {
+            [self selectFolderAndStartBatchBenchmark:reloadBlock];
+        }
     } else {
-        // Display 1-based index, accounting for skipped CentroidFan (index 3)
-        int displayIndex = _benchmarkMethodIndex < 3 ? _benchmarkMethodIndex + 1 : _benchmarkMethodIndex;
-        ImGui::Text("Benchmarking method %d/10, phase %d...", displayIndex, _benchmarkPhase);
+        // Display progress
+        if (_batchFiles && _batchFileIndex >= 0) {
+            int displayIndex = _benchmarkMethodIndex < 3 ? _benchmarkMethodIndex + 1 : _benchmarkMethodIndex;
+            NSString *fileName = [[_batchFiles[_batchFileIndex] lastPathComponent] stringByDeletingPathExtension];
+            ImGui::Text("File %d/%zu: %s, Method %d/10, phase %d...",
+                       _batchFileIndex + 1, _batchFiles.count, fileName.UTF8String, displayIndex, _benchmarkPhase);
+        } else {
+            int displayIndex = _benchmarkMethodIndex < 3 ? _benchmarkMethodIndex + 1 : _benchmarkMethodIndex;
+            ImGui::Text("Benchmarking method %d/10, phase %d...", displayIndex, _benchmarkPhase);
+        }
     }
     ImGui::End();
     
@@ -581,7 +595,7 @@ static inline double machTimeToMs(uint64_t start, uint64_t end) {
                 _lastMeshMetrics = TriangulationMetrics::ComputeMeshMetrics(expandedVertices, expandedIndices, fb, tile);
                 _hasMeshMetrics = YES;
             }
-            _benchmarkDelayFrames = 50;
+            _benchmarkDelayFrames = 100;
             _benchmarkPhase = 2;
         }
             break;
@@ -593,7 +607,7 @@ static inline double machTimeToMs(uint64_t start, uint64_t end) {
             break;
             
         case 3: // Start frametime recording
-            _gpuFrameTimer->startMeasurement(300, [self](const GPUFrameTimer::Results& results) {
+            _gpuFrameTimer->startMeasurement(200, [self](const GPUFrameTimer::Results& results) {
                 self->_lastGPUFrameResults = results;
                 self->_hasGPUFrameResults = YES;
             });

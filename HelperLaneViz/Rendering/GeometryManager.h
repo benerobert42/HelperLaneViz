@@ -47,6 +47,9 @@ NS_ASSUME_NONNULL_BEGIN
 
 - (void)updateViewportSize:(vector_uint2)size;
 
+// Update instance grid without reloading geometry (for performance)
+- (void)updateInstanceGridWithCols:(uint32_t)cols rows:(uint32_t)rows;
+
 // Accessors for geometry data
 - (id<MTLBuffer>)vertexBuffer;
 - (id<MTLBuffer>)indexBuffer;

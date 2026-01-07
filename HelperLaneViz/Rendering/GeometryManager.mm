@@ -56,9 +56,6 @@
                gridRows:(uint32_t)rows
     bezierMaxDeviationPx:(float)bezierMaxDeviationPx {
     
-    _instanceGridCols = cols;
-    _instanceGridRows = rows;
-    
     // Create triangulator that uses the selected method
     SVGLoader::Triangulator triangulator = [self, method](const std::vector<Vertex>& verts, bool shouldHandleConcave) -> std::vector<uint32_t> {
         return [self triangulateVertices:verts method:method shouldHandleConcave:shouldHandleConcave];
@@ -95,9 +92,6 @@
                  triangulationMethod:(TriangulationMethod)method
                     instanceGridCols:(uint32_t)cols
                             gridRows:(uint32_t)rows {
-    
-    _instanceGridCols = cols;
-    _instanceGridRows = rows;
     
     // Generate ellipse vertices (centered at origin, major axis = 1.0)
     const int segments = MAX(3, vertexCount);
@@ -257,12 +251,17 @@
 }
 
 - (void)setupInstanceGridWithCols:(uint32_t)cols rows:(uint32_t)rows {
-    // Fill the viewport with a grid of instances
-    // NDC space is [-1, 1] in both X and Y
-    
-    // Compute actual geometry bounds
-    float minX = FLT_MAX, maxX = -FLT_MAX;
-    float minY = FLT_MAX, maxY = -FLT_MAX;
+    _instanceGridCols = cols;
+    _instanceGridRows = rows;
+    [self updateInstanceGridWithCols:cols rows:rows];
+}
+
+- (void)updateInstanceGridWithCols:(uint32_t)cols rows:(uint32_t)rows {
+    float minX = FLT_MAX;
+    float maxX = -FLT_MAX;
+    float minY = FLT_MAX;
+    float maxY = -FLT_MAX;
+
     for (const auto& v : _currentVertices) {
         minX = std::min(minX, v.position.x);
         maxX = std::max(maxX, v.position.x);
@@ -271,50 +270,30 @@
     }
     const float geomWidth = maxX - minX;
     const float geomHeight = maxY - minY;
-    const float geomAspect = (geomHeight > 0.0001f) ? (geomWidth / geomHeight) : 1.0f;
     
-    // Add padding around edges and between instances
-    const float edgePadding = 0.00f;
-    const float instancePadding = 0.00f;
-    
-    // Available space after edge padding
+    // Equal cell sizes - divide NDC space evenly
+    const float edgePadding = 0.05f; // Small padding to keep instances inside frame
     const float availableWidth = 2.0f - 2.0f * edgePadding;
     const float availableHeight = 2.0f - 2.0f * edgePadding;
     
-    // Total padding between instances
-    const float totalGapX = instancePadding * (cols - 1);
-    const float totalGapY = instancePadding * (rows - 1);
+    const float cellSize = std::min(availableWidth / cols, availableHeight / rows);
     
-    // Base cell size
-    const float baseCellWidth = (availableWidth - totalGapX) / cols;
-    const float baseCellHeight = (availableHeight - totalGapY) / rows;
+    // Scale to fit geometry in cell while maintaining aspect ratio
+    const float scaleX = (geomWidth > 0.0001f) ? (cellSize * 0.95f / geomWidth) : 1.0f;
+    const float scaleY = (geomHeight > 0.0001f) ? (cellSize * 0.95f / geomHeight) : 1.0f;
+    const float shapeScale = std::min(scaleX, scaleY); // Fit geometry inside cell
     
-    // Adjust cell dimensions to match geometry aspect ratio
-    float cellWidth, cellHeight;
-    if (geomAspect > 1.0f) {
-        // Geometry is wider than tall
-        cellWidth = baseCellWidth;
-        cellHeight = baseCellWidth / geomAspect;
-    } else {
-        // Geometry is taller than wide (or square)
-        cellHeight = baseCellHeight;
-        cellWidth = baseCellHeight * geomAspect;
-    }
-    
-    // Scale factor: geometry spans geomWidth x geomHeight, fit into cell
-    const float scaleX = cellWidth / geomWidth;
-    const float scaleY = cellHeight / geomHeight;
-    const float shapeScale = std::min(scaleX, scaleY) * 0.9f; // 90% for breathing room
-    
-    // Origin is bottom-left of the grid in NDC
-    const float originX = -1.0f + edgePadding + cellWidth * 0.5f;
-    const float originY = -1.0f + edgePadding + cellHeight * 0.5f;
-    
+    // Grid spans from -1+padding to 1-padding, centered
+    const float gridWidth = cellSize * cols;
+    const float gridHeight = cellSize * rows;
+    const float gridStartX = -1.0f + edgePadding + (availableWidth - gridWidth) * 0.5f;
+    const float gridStartY = -1.0f + edgePadding + (availableHeight - gridHeight) * 0.5f;
+
     _gridParams = (GridParams){
         .cols = cols,
         .rows = rows,
-        .cellSize = {cellWidth + instancePadding, cellHeight + instancePadding},
-        .origin = {originX, originY},
+        .cellSize = {cellSize, cellSize},
+        .origin = {gridStartX, gridStartY},
         .scale = shapeScale
     };
 }
