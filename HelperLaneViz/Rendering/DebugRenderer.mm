@@ -87,6 +87,8 @@ static inline double machTimeToMs(uint64_t start, uint64_t end) {
     // Batch benchmark state
     NSArray<NSString *> *_batchFiles;  // Array of SVG file paths
     int _batchFileIndex;  // Current file being benchmarked
+    NSString *_batchOutputFolder;  // Folder path for CSV output
+    FILE *_csvFile;  // CSV file handle
     
     // Display size tracking
     CGSize _displaySize;
@@ -116,6 +118,10 @@ static inline double machTimeToMs(uint64_t start, uint64_t end) {
     _ellipseAxisRatio = 1.0f;
     _ellipseVertexCount = 64;
     _benchmarkRunning = NO;
+    _batchFiles = nil;
+    _batchFileIndex = -1;
+    _batchOutputFolder = nil;
+    _csvFile = nullptr;
     _displaySize = CGSizeZero;
     
     // Setup Dear ImGui context - following official example pattern
@@ -468,6 +474,12 @@ static inline double machTimeToMs(uint64_t start, uint64_t end) {
     ImGui_ImplOSX_Shutdown();
     ImGui::DestroyContext();
     
+    // Close CSV file if still open
+    if (_csvFile) {
+        fclose(_csvFile);
+        _csvFile = nullptr;
+    }
+    
     if (_gpuFrameTimer) {
         delete _gpuFrameTimer;
         _gpuFrameTimer = nullptr;
@@ -634,8 +646,13 @@ static inline double machTimeToMs(uint64_t start, uint64_t end) {
                 
                 _benchmarkMethodIndex++;
                 if (_benchmarkMethodIndex >= 11) {
-                    // Done - print results
-                    printf("\nMethod\tTriCount\tTotalEdgeLength\tHelperSum\tHelperRatio\tTris/Tile Mean\tTris/Tile Med\tTris/Tile P95\tTiles/Tri Mean\tTiles/Tri Med\tTiles/Tri P95\tFrametime Mean\tFrametime Med\tFrametime Dev\n");
+                    // Done with all methods - print results
+                    NSString *fileName = nil;
+                    if (_batchFiles && _batchFileIndex >= 0) {
+                        fileName = [[_batchFiles[_batchFileIndex] lastPathComponent] stringByDeletingPathExtension];
+                        printf("\n=== File: %s ===\n", fileName.UTF8String);
+                    }
+                    printf("Method\tTriCount\tTotalEdgeLength\tHelperSum\tHelperRatio\tTris/Tile Mean\tTris/Tile Med\tTris/Tile P95\tTiles/Tri Mean\tTiles/Tri Med\tTiles/Tri P95\tFrametime Mean\tFrametime Med\tFrametime Dev\n");
                     for (int i = 0; i < 11; i++) {
                         if (i == 3) continue;  // Skip CentroidFan
                         BenchmarkResult& br = _benchmarkResults[i];
@@ -644,14 +661,128 @@ static inline double machTimeToMs(uint64_t start, uint64_t end) {
                                br.trisPerTileMean, br.trisPerTileMed, br.trisPerTileP95,
                                br.tilesPerTriMean, br.tilesPerTriMed, br.tilesPerTriP95,
                                br.frametimeMean, br.frametimeMed, br.frametimeDev);
+                        
+                        // Write to CSV if batch mode
+                        if (_csvFile && fileName) {
+                            fprintf(_csvFile, "%s,%s,%zu,%.2f,%llu,%.3f,%.2f,%.2f,%.2f,%.2f,%.2f,%.2f,%.3f,%.3f,%.3f\n",
+                                    fileName.UTF8String, methodNames[i], br.triCount, br.totalEdgeLength, br.helperSum, br.helperRatio,
+                                    br.trisPerTileMean, br.trisPerTileMed, br.trisPerTileP95,
+                                    br.tilesPerTriMean, br.tilesPerTriMed, br.tilesPerTriP95,
+                                    br.frametimeMean, br.frametimeMed, br.frametimeDev);
+                            fflush(_csvFile);  // Flush after each write to ensure data is saved
+                        }
                     }
                     printf("\n");
-                    _benchmarkRunning = NO;
+                    
+                    // Check if batch mode - move to next file
+                    if (_batchFiles && _batchFileIndex >= 0) {
+                        _batchFileIndex++;
+                        if (_batchFileIndex < (int)_batchFiles.count) {
+                            // Load next file and restart benchmark
+                            NSString *nextFile = _batchFiles[_batchFileIndex];
+                            reloadBlock(nextFile, (TriangulationMethod)0, _instanceGridCols, _instanceGridRows, _bezierMaxDeviationPx);
+                            _currentSVGPath = nextFile;
+                            _benchmarkMethodIndex = 0;
+                            _benchmarkPhase = 1;  // Skip reload phase, go straight to compute metrics (file already loaded)
+                            memset(_benchmarkResults, 0, sizeof(_benchmarkResults));
+                        } else {
+                            // Done with all files
+                            printf("=== Batch benchmark complete ===\n\n");
+                            if (_csvFile) {
+                                fclose(_csvFile);
+                                _csvFile = nullptr;
+                                printf("Results saved to: %s/benchmark_results.csv\n", _batchOutputFolder.UTF8String);
+                            }
+                            _benchmarkRunning = NO;
+                            _batchFiles = nil;
+                            _batchFileIndex = -1;
+                            _batchOutputFolder = nil;
+                        }
+                    } else {
+                        // Single file benchmark done
+                        _benchmarkRunning = NO;
+                    }
                 } else {
                     _benchmarkPhase = 0;
                 }
             }
             break;
+    }
+}
+
+- (void)selectFolderAndStartBatchBenchmark:(void(^)(NSString *path, TriangulationMethod method, uint32_t cols, uint32_t rows, float bezierDev))reloadBlock {
+    NSOpenPanel *panel = [NSOpenPanel openPanel];
+    panel.canChooseFiles = NO;
+    panel.canChooseDirectories = YES;
+    panel.allowsMultipleSelection = NO;
+    panel.message = @"Select folder containing SVG files";
+    
+    // Request write access for the selected folder (needed for CSV output)
+    if ([panel runModal] == NSModalResponseOK) {
+        NSURL *folderURL = panel.URL;
+        
+        // Start accessing security-scoped resource (needed for sandboxed apps)
+        BOOL accessing = [folderURL startAccessingSecurityScopedResource];
+        if (!accessing) {
+            NSLog(@"Warning: Could not access security-scoped resource");
+        }
+        
+        NSString *folderPath = folderURL.path;
+        
+        // Get all SVG files in folder
+        NSFileManager *fileManager = [NSFileManager defaultManager];
+        NSError *error = nil;
+        NSArray<NSString *> *allFiles = [fileManager contentsOfDirectoryAtPath:folderPath error:&error];
+        
+        if (error) {
+            NSLog(@"Error reading folder: %@", error);
+            return;
+        }
+        
+        // Filter for .svg files
+        NSMutableArray<NSString *> *svgFiles = [NSMutableArray array];
+        for (NSString *file in allFiles) {
+            if ([[file pathExtension] caseInsensitiveCompare:@"svg"] == NSOrderedSame) {
+                NSString *fullPath = [folderPath stringByAppendingPathComponent:file];
+                [svgFiles addObject:fullPath];
+            }
+        }
+        
+        if (svgFiles.count == 0) {
+            NSLog(@"No SVG files found in folder: %@", folderPath);
+            return;
+        }
+        
+        // Sort files alphabetically
+        [svgFiles sortUsingSelector:@selector(compare:)];
+        
+        // Create CSV file in selected folder
+        _batchOutputFolder = folderPath;
+        NSString *csvPath = [folderPath stringByAppendingPathComponent:@"benchmark_results.csv"];
+        _csvFile = fopen(csvPath.UTF8String, "w");
+        if (_csvFile) {
+            fprintf(_csvFile, "File,Method,TriCount,TotalEdgeLength,HelperSum,HelperRatio,TrisPerTileMean,TrisPerTileMed,TrisPerTileP95,TilesPerTriMean,TilesPerTriMed,TilesPerTriP95,FrametimeMean,FrametimeMed,FrametimeDev\n");
+            fflush(_csvFile);  // Ensure header is written immediately
+            printf("CSV file created: %s\n", csvPath.UTF8String);
+        } else {
+            NSLog(@"Failed to create CSV file at: %@", csvPath);
+            printf("ERROR: Failed to create CSV file at: %s\n", csvPath.UTF8String);
+        }
+        
+        // Start batch benchmark with first file
+        _batchFiles = svgFiles;
+        _batchFileIndex = 0;
+        _benchmarkRunning = YES;
+        _benchmarkMethodIndex = 0;
+        _benchmarkPhase = 0;
+        memset(_benchmarkResults, 0, sizeof(_benchmarkResults));
+        
+        NSString *firstFile = _batchFiles[0];
+        reloadBlock(firstFile, (TriangulationMethod)0, _instanceGridCols, _instanceGridRows, _bezierMaxDeviationPx);
+        _currentSVGPath = firstFile;
+        _shapeType = 0;  // Ensure SVG mode
+        
+        printf("\n=== Starting batch benchmark: %zu files ===\n\n", svgFiles.count);
     }
 }
 
