@@ -129,6 +129,25 @@
     return YES;
 }
 
+- (void)loadGeometryFromVertices:(const std::vector<Vertex>&)vertices
+                          indices:(const std::vector<uint32_t>&)indices
+                 instanceGridCols:(uint32_t)cols
+                         gridRows:(uint32_t)rows {
+    // Assert that input is valid - crash if invalid
+    NSAssert(!vertices.empty() && !indices.empty() && vertices.size() >= 3,
+            @"Invalid geometry: vertices=%zu, indices=%zu", vertices.size(), indices.size());
+    
+    _currentVertices = vertices;
+    _currentIndices = indices;
+    
+    [self uploadVertices:vertices indices:indices];
+    [self setupOrthographicProjection];
+    [self setupInstanceGridWithCols:cols rows:rows];
+    
+    NSLog(@"Loaded geometry from vertices (%zu vertices, %zu triangles, grid=%dx%d)",
+          vertices.size(), indices.size() / 3, cols, rows);
+}
+
 - (void)updateViewportSize:(vector_uint2)size {
     _viewportSize = size;
 }
@@ -229,6 +248,10 @@
 - (void)uploadVertices:(const std::vector<Vertex>&)vertices
                indices:(const std::vector<uint32_t>&)indices {
     
+    // Assert that input is valid - crash if invalid
+    NSAssert(!vertices.empty() && !indices.empty(),
+            @"Cannot upload empty geometry: vertices=%zu, indices=%zu", vertices.size(), indices.size());
+    
     _vertexBuffer = [_device newBufferWithBytes:vertices.data()
                                          length:vertices.size() * sizeof(Vertex)
                                         options:MTLResourceStorageModeShared];
@@ -271,6 +294,10 @@
     const float geomWidth = maxX - minX;
     const float geomHeight = maxY - minY;
     
+    // Compute geometry center (for centering in cells)
+    const float geomCenterX = (minX + maxX) * 0.5f;
+    const float geomCenterY = (minY + maxY) * 0.5f;
+    
     // Equal cell sizes - divide NDC space evenly
     const float edgePadding = 0.05f; // Small padding to keep instances inside frame
     const float availableWidth = 2.0f - 2.0f * edgePadding;
@@ -288,12 +315,17 @@
     const float gridHeight = cellSize * rows;
     const float gridStartX = -1.0f + edgePadding + (availableWidth - gridWidth) * 0.5f;
     const float gridStartY = -1.0f + edgePadding + (availableHeight - gridHeight) * 0.5f;
+    
+    // Compute cell center offset (half cell size)
+    const float cellCenterOffsetX = cellSize * 0.5f;
+    const float cellCenterOffsetY = cellSize * 0.5f;
 
     _gridParams = (GridParams){
         .cols = cols,
         .rows = rows,
         .cellSize = {cellSize, cellSize},
-        .origin = {gridStartX, gridStartY},
+        .origin = {gridStartX + cellCenterOffsetX - geomCenterX * shapeScale, 
+                   gridStartY + cellCenterOffsetY - geomCenterY * shapeScale},
         .scale = shapeScale
     };
 }

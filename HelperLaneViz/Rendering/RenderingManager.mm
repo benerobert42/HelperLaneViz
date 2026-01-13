@@ -28,7 +28,9 @@
     GridOverlay *_gridOverlay;
     
     id<MTLTexture> _helperLaneTexture;
+    id<MTLTexture> _helperLaneTextureSmall;  // 1x1 fallback
     id<MTLSamplerState> _pointSampler;
+    BOOL _useHelperTexture;
     
     DebugRenderer *_debugRenderer;
     
@@ -41,6 +43,7 @@
     _device = device;
     _view = view;
     _lastSampleCount = _view.sampleCount;
+    _useHelperTexture = YES;  // Enabled by default
     
     [self setupPipelines];
     [self setupGridOverlay];
@@ -85,11 +88,22 @@
 }
 
 - (void)setupHelperLaneResources {
-    // Create 1x1 dummy texture for helper lane engagement
-    MTLTextureDescriptor *helperTexDesc = [MTLTextureDescriptor texture2DDescriptorWithPixelFormat:MTLPixelFormatR8Unorm width:1 height:1 mipmapped:NO];
+    // Create 2048x2048 red texture for helper lane engagement
+    const int textureSize = 2048;
+    MTLTextureDescriptor *helperTexDesc = [MTLTextureDescriptor texture2DDescriptorWithPixelFormat:MTLPixelFormatR8Unorm width:textureSize height:textureSize mipmapped:NO];
     _helperLaneTexture = [_device newTextureWithDescriptor:helperTexDesc];
-    uint8_t white = 255;
-    [_helperLaneTexture replaceRegion:MTLRegionMake2D(0, 0, 1, 1) mipmapLevel:0 withBytes:&white bytesPerRow:1];
+    
+    // Generate red texture data procedurally
+    uint8_t *textureData = (uint8_t *)malloc(textureSize * textureSize);
+    memset(textureData, 255, textureSize * textureSize);  // All red (255)
+    [_helperLaneTexture replaceRegion:MTLRegionMake2D(0, 0, textureSize, textureSize) mipmapLevel:0 withBytes:textureData bytesPerRow:textureSize];
+    free(textureData);
+    
+    // Create 1x1 fallback texture
+    MTLTextureDescriptor *smallTexDesc = [MTLTextureDescriptor texture2DDescriptorWithPixelFormat:MTLPixelFormatR8Unorm width:1 height:1 mipmapped:NO];
+    _helperLaneTextureSmall = [_device newTextureWithDescriptor:smallTexDesc];
+    uint8_t red = 255;
+    [_helperLaneTextureSmall replaceRegion:MTLRegionMake2D(0, 0, 1, 1) mipmapLevel:0 withBytes:&red bytesPerRow:1];
     
     MTLSamplerDescriptor *samplerDesc = [MTLSamplerDescriptor new];
     samplerDesc.minFilter = MTLSamplerMinMagFilterNearest;
@@ -125,6 +139,11 @@
     const NSUInteger indexCount = geometry.indexCount;
     const NSUInteger instanceCount = geometry.instanceCount;
     
+    // Assert that geometry is valid - crash if invalid
+    NSAssert(indexCount > 0, @"Cannot render with zero index count");
+    NSAssert(geometry.indexBuffer != nil, @"Cannot render with nil index buffer");
+    NSAssert(geometry.vertexBuffer != nil, @"Cannot render with nil vertex buffer");
+    
     // Common render state (no depth, no culling for 2D)
     [encoder setCullMode:MTLCullModeNone];
     
@@ -133,7 +152,8 @@
         case VisualizationModeHelperLane:
             [encoder setRenderPipelineState:_mainPipeline];
             [encoder setTriangleFillMode:MTLTriangleFillModeFill];
-            [encoder setFragmentTexture:_helperLaneTexture atIndex:0];
+            // Always bind a texture (2048x2048 when enabled, 1x1 when disabled)
+            [encoder setFragmentTexture:(_useHelperTexture ? _helperLaneTexture : _helperLaneTextureSmall) atIndex:0];
             [encoder setFragmentSamplerState:_pointSampler atIndex:0];
             break;
             
@@ -218,6 +238,10 @@
                       rows:(uint32_t)rows
           bezierDeviation:(float)bezierDev {
     [_debugRenderer setCurrentSVGPath:path method:method cols:cols rows:rows bezierDeviation:bezierDev];
+}
+
+- (void)setUseHelperTexture:(BOOL)use {
+    _useHelperTexture = use;
 }
 
 - (void*)gpuFrameTimer {

@@ -11,6 +11,7 @@
 #import "TriangulationMetrics.h"
 #import "Measurements/GPUFrameTimer.h"
 #include "../Geometry/Triangulation.h"
+#include "../Geometry/GeometryFactory.h"
 
 #import <Metal/Metal.h>
 #import <MetalKit/MetalKit.h>
@@ -82,16 +83,28 @@ static inline double machTimeToMs(uint64_t start, uint64_t end) {
         double frametimeMean, frametimeMed, frametimeDev;
         size_t triCount;
     };
-    BenchmarkResult _benchmarkResults[11];  // One per triangulation method
+    BenchmarkResult _benchmarkResults[11];  // One per triangulation method (using actual method indices)
+    // Benchmark methods in order: CDT, CDT flipped, Earcut, Earcut flipped, Greedy Max Area, MWT
+    int _benchmarkMethodIndices[6];  // Maps benchmark index to actual method index
     
     // Batch benchmark state
     NSArray<NSString *> *_batchFiles;  // Array of SVG file paths
     int _batchFileIndex;  // Current file being benchmarked
     NSString *_batchOutputFolder;  // Folder path for CSV output
     FILE *_csvFile;  // CSV file handle
+    BOOL _batchIncludeSyntheticShapes;  // Whether to include circle and ellipse in batch
+    int _syntheticShapeIndex;  // 0 = circle, 1 = ellipse, -1 = none
     
     // Display size tracking
     CGSize _displaySize;
+    
+    // Window size controls
+    int _windowWidth;
+    int _windowHeight;
+    BOOL _windowSizeChanged;
+    
+    // Helper texture usage
+    BOOL _useHelperTexture;
 }
 
 - (instancetype)initWithDevice:(id<MTLDevice>)device view:(MTKView *)view {
@@ -122,7 +135,30 @@ static inline double machTimeToMs(uint64_t start, uint64_t end) {
     _batchFileIndex = -1;
     _batchOutputFolder = nil;
     _csvFile = nullptr;
+    _batchIncludeSyntheticShapes = NO;
+    _syntheticShapeIndex = -1;
     _displaySize = CGSizeZero;
+    
+    // Initialize benchmark method indices in order: CDT, CDT flipped, Earcut, Earcut flipped, Greedy Max Area, MWT
+    _benchmarkMethodIndices[0] = TriangulationMethodConstrainedDelaunay;  // CDT
+    _benchmarkMethodIndices[1] = TriangulationMethodConstrainedDelaunayFlipped;  // CDT flipped
+    _benchmarkMethodIndices[2] = TriangulationMethodEarClipping;  // Earcut
+    _benchmarkMethodIndices[3] = TriangulationMethodEarClippingTriangulatorFlipped;  // Earcut flipped
+    _benchmarkMethodIndices[4] = TriangulationMethodGreedyMaxArea;  // Greedy Max Area
+    _benchmarkMethodIndices[5] = TriangulationMethodMinimumWeight;  // MWT
+    
+    // Initialize window size from actual window
+    NSWindow *window = view.window;
+    if (window) {
+        NSRect contentRect = [window contentRectForFrameRect:window.frame];
+        _windowWidth = (int)contentRect.size.width;
+        _windowHeight = (int)contentRect.size.height;
+    } else {
+    _windowWidth = 1024;
+    _windowHeight = 768;
+    }
+    _windowSizeChanged = NO;
+    _useHelperTexture = YES;  // Enabled by default
     
     // Setup Dear ImGui context - following official example pattern
     IMGUI_CHECKVERSION();
@@ -146,6 +182,19 @@ static inline double machTimeToMs(uint64_t start, uint64_t end) {
 
 - (void)updateDisplaySize:(CGSize)size {
     _displaySize = size;
+    
+    // Update window size controls to match actual window size (only if not programmatically changing)
+    if (!_windowSizeChanged) {
+        NSWindow *window = _view.window;
+        if (window) {
+            NSRect contentRect = [window contentRectForFrameRect:window.frame];
+            _windowWidth = (int)contentRect.size.width;
+            _windowHeight = (int)contentRect.size.height;
+        } else {
+            _windowWidth = (int)size.width;
+            _windowHeight = (int)size.height;
+        }
+    }
 }
 
 - (BOOL)newFrameWithRenderPassDescriptor:(MTLRenderPassDescriptor *)renderPassDescriptor {
@@ -180,7 +229,8 @@ static inline double machTimeToMs(uint64_t start, uint64_t end) {
 - (void)renderUIWithGeometry:(GeometryManager *)geometry
                       metrics:(MetricsComputer *)metrics
               onGeometryReload:(void(^)(NSString *path, TriangulationMethod method, uint32_t cols, uint32_t rows, float bezierDev))reloadBlock
-               onEllipseReload:(void(^)(float axisRatio, int vertexCount, TriangulationMethod method, uint32_t cols, uint32_t rows))ellipseBlock {
+               onEllipseReload:(void(^)(float axisRatio, int vertexCount, TriangulationMethod method, uint32_t cols, uint32_t rows))ellipseBlock
+            onHelperTextureChange:(void(^)(BOOL use))helperTextureBlock {
     
     // Main UI: visualization controls + metrics
     ImGui::Begin("HelperLaneViz");
@@ -225,6 +275,44 @@ static inline double machTimeToMs(uint64_t start, uint64_t end) {
     
     // Note: When MSAA changes, newFrameWithRenderPassDescriptor will skip the frame
     // and RenderingManager will update pipelines on the next frame via updatePipelinesForCurrentSampleCount
+    
+    ImGui::Separator();
+    ImGui::Text("Rendering Settings");
+    
+    // Helper Texture
+    {
+        bool useTexture = _useHelperTexture;
+        if (ImGui::Checkbox("Use Helper Texture (2048x2048)", &useTexture)) {
+            _useHelperTexture = useTexture ? YES : NO;
+            if (helperTextureBlock) {
+                helperTextureBlock(_useHelperTexture);
+            }
+        }
+    }
+    
+    ImGui::Separator();
+    ImGui::Text("Window Settings");
+    
+    // Window Size
+    {
+        int width = _windowWidth;
+        int height = _windowHeight;
+        // Use InputInt without step constraints to allow any value
+        bool widthChanged = ImGui::InputInt("Width (px)", &width, 0, 0, ImGuiInputTextFlags_None);
+        bool heightChanged = ImGui::InputInt("Height (px)", &height, 0, 0, ImGuiInputTextFlags_None);
+        
+        if (widthChanged || heightChanged) {
+            // Clamp to reasonable bounds (allow up to 8K resolution)
+            width = MAX(100, MIN(8192, width));
+            height = MAX(100, MIN(8192, height));
+            
+            if (width != _windowWidth || height != _windowHeight) {
+                _windowWidth = width;
+                _windowHeight = height;
+                _windowSizeChanged = YES;
+            }
+        }
+    }
     
     ImGui::Separator();
     ImGui::Text("Geometry Settings");
@@ -437,14 +525,15 @@ static inline double machTimeToMs(uint64_t start, uint64_t end) {
         }
     } else {
         // Display progress
-        if (_batchFiles && _batchFileIndex >= 0) {
-            int displayIndex = _benchmarkMethodIndex < 3 ? _benchmarkMethodIndex + 1 : _benchmarkMethodIndex;
+        if (_batchFiles && _batchFileIndex >= 0 && _batchFileIndex < (int)_batchFiles.count) {
             NSString *fileName = [[_batchFiles[_batchFileIndex] lastPathComponent] stringByDeletingPathExtension];
-            ImGui::Text("File %d/%zu: %s, Method %d/10, phase %d...",
-                       _batchFileIndex + 1, _batchFiles.count, fileName.UTF8String, displayIndex, _benchmarkPhase);
+            ImGui::Text("File %d/%zu: %s, Method %d/6, phase %d...",
+                       _batchFileIndex + 1, _batchFiles.count, fileName.UTF8String, _benchmarkMethodIndex + 1, _benchmarkPhase);
+        } else if (_syntheticShapeIndex >= 0) {
+            const char* shapeName = (_syntheticShapeIndex == 0) ? "Circle (512 vertices)" : "Ellipse (512 vertices, y=0.5x)";
+            ImGui::Text("Shape: %s, Method %d/6, phase %d...", shapeName, _benchmarkMethodIndex + 1, _benchmarkPhase);
         } else {
-            int displayIndex = _benchmarkMethodIndex < 3 ? _benchmarkMethodIndex + 1 : _benchmarkMethodIndex;
-            ImGui::Text("Benchmarking method %d/10, phase %d...", displayIndex, _benchmarkPhase);
+            ImGui::Text("Benchmarking method %d/6, phase %d...", _benchmarkMethodIndex + 1, _benchmarkPhase);
         }
     }
     ImGui::End();
@@ -452,6 +541,27 @@ static inline double machTimeToMs(uint64_t start, uint64_t end) {
     // Benchmark state machine
     if (_benchmarkRunning) {
         [self runBenchmarkStepWithGeometry:geometry metrics:metrics reloadBlock:reloadBlock ellipseBlock:ellipseBlock];
+    }
+    
+    // Apply window size changes
+    if (_windowSizeChanged) {
+        NSWindow *window = _view.window;
+        if (window) {
+            NSRect frame = window.frame;
+            NSRect contentRect = [window contentRectForFrameRect:frame];
+            CGFloat titleBarHeight = frame.size.height - contentRect.size.height;
+            
+            // Calculate new frame size (content size + title bar)
+            NSSize newContentSize = NSMakeSize((CGFloat)_windowWidth, (CGFloat)_windowHeight);
+            NSRect newContentRect = NSMakeRect(frame.origin.x, frame.origin.y, newContentSize.width, newContentSize.height);
+            NSRect newFrame = [window frameRectForContentRect:newContentRect];
+            
+            // Keep the top-left corner in place
+            newFrame.origin.y = frame.origin.y + frame.size.height - newFrame.size.height;
+            
+            [window setFrame:newFrame display:YES animate:NO];
+        }
+        _windowSizeChanged = NO;
     }
 }
 
@@ -545,24 +655,78 @@ static inline double machTimeToMs(uint64_t start, uint64_t end) {
     
     const char* methodNames[] =
         {"EarClipping", "EarClippingTriangulator", "EarClippingTriangulatorFlipped", "CentroidFan", "Strip", "GreedyMaxArea", "MinWeight", "MaxMinArea", "MinMaxArea", "ConstrainedDelaunay", "ConstrainedDelaunayFlipped"};
-
-    // Skip CentroidFan it modifies vertices which breaks metrics
-    if (_benchmarkMethodIndex == 3) {
-        _benchmarkMethodIndex = 4;
-    }
+    
+    // Map benchmark index to actual method index
+    int actualMethodIndex = _benchmarkMethodIndices[_benchmarkMethodIndex];
     
     switch (_benchmarkPhase) {
         case 0: // Reload geometry with current method
-            if (_shapeType == 0 && _currentSVGPath) {
+            if (_syntheticShapeIndex >= 0) {
+                // Generate synthetic shape using GeometryFactory
+                std::vector<Vertex> vertices;
+                if (_syntheticShapeIndex == 0) {
+                    // Circle with 512 vertices, radius = 1.0
+                    vertices = GeometryFactory::CreateVerticesForCircle(512, 1.0f);
+                } else {
+                    // Ellipse with 512 vertices, a=1.0, b=0.5 (y-axis is 0.5 * x-axis)
+                    vertices = GeometryFactory::CreateVerticesForEllipse(512, 1.0f, 0.5f);
+                }
+                
+                // Triangulate using the current method
+                std::vector<uint32_t> indices;
+                switch ((TriangulationMethod)actualMethodIndex) {
+                    case TriangulationMethodEarClipping:
+                        indices = Triangulation::EarClipping(vertices);
+                        break;
+                    case TriangulationMethodEarClippingTriangulator:
+                        indices = Triangulation::EarClippingMapbox(vertices);
+                        break;
+                    case TriangulationMethodEarClippingTriangulatorFlipped:
+                        indices = Triangulation::EarClippingMapboxWithEdgeFlips(vertices);
+                        break;
+                    case TriangulationMethodCentroidFan:
+                        indices = Triangulation::CentroidFan(vertices);
+                        break;
+                    case TriangulationMethodStrip:
+                        indices = Triangulation::Strip(vertices);
+                        break;
+                    case TriangulationMethodGreedyMaxArea:
+                        indices = Triangulation::GreedyMaxArea(vertices, false);
+                        break;
+                    case TriangulationMethodMinimumWeight:
+                        indices = Triangulation::MinimumWeight(vertices, false);
+                        break;
+                    case TriangulationMethodMaxMinArea:
+                        indices = Triangulation::MaxMinArea(vertices, false);
+                        break;
+                    case TriangulationMethodMinMaxArea:
+                        indices = Triangulation::MinMaxArea(vertices, false);
+                        break;
+                    case TriangulationMethodConstrainedDelaunay:
+                        indices = Triangulation::ConstrainedDelaunay(vertices);
+                        break;
+                    case TriangulationMethodConstrainedDelaunayFlipped:
+                        indices = Triangulation::ConstrainedDelaunayWithEdgeFlips(vertices);
+                        break;
+                }
+                
+                // Assert that triangulation succeeded - crash if it failed
+                NSAssert(!indices.empty() && vertices.size() >= 3, 
+                        @"Triangulation failed for synthetic shape: method=%d, shape=%d, vertices=%zu, indices=%zu", 
+                        actualMethodIndex, _syntheticShapeIndex, vertices.size(), indices.size());
+                
+                // Upload geometry to GeometryManager
+                [geometry loadGeometryFromVertices:vertices indices:indices instanceGridCols:_instanceGridCols gridRows:_instanceGridRows];
+            } else if (_shapeType == 0 && _currentSVGPath) {
                 reloadBlock(_currentSVGPath,
-                            (TriangulationMethod)_benchmarkMethodIndex,
+                            (TriangulationMethod)actualMethodIndex,
                             _instanceGridCols,
                             _instanceGridRows,
                             _bezierMaxDeviationPx);
             } else if (_shapeType == 1) {
                 ellipseBlock(_ellipseAxisRatio,
                              _ellipseVertexCount,
-                             (TriangulationMethod)_benchmarkMethodIndex,
+                             (TriangulationMethod)actualMethodIndex,
                              _instanceGridCols,
                              _instanceGridRows);
             }
@@ -628,8 +792,8 @@ static inline double machTimeToMs(uint64_t start, uint64_t end) {
             
         case 4: // Wait for frametime recording to complete
             if (!_gpuFrameTimer->isActive()) {
-                // Store results
-                BenchmarkResult& r = _benchmarkResults[_benchmarkMethodIndex];
+                // Store results (using actual method index for storage)
+                BenchmarkResult& r = _benchmarkResults[actualMethodIndex];
                 r.helperSum = _lastHelperSum;
                 r.helperRatio = _lastHelperRatio;
                 r.totalEdgeLength = _hasMeshMetrics ? _lastMeshMetrics.totalEdgeLength : 0;
@@ -645,19 +809,23 @@ static inline double machTimeToMs(uint64_t start, uint64_t end) {
                 r.triCount = _hasMeshMetrics ? _lastMeshMetrics.triangleCount : 0;
                 
                 _benchmarkMethodIndex++;
-                if (_benchmarkMethodIndex >= 11) {
+                if (_benchmarkMethodIndex >= 6) {  // Only 6 methods to benchmark
                     // Done with all methods - print results
                     NSString *fileName = nil;
-                    if (_batchFiles && _batchFileIndex >= 0) {
+                    if (_batchFiles && _batchFileIndex >= 0 && _batchFileIndex < (int)_batchFiles.count) {
                         fileName = [[_batchFiles[_batchFileIndex] lastPathComponent] stringByDeletingPathExtension];
                         printf("\n=== File: %s ===\n", fileName.UTF8String);
+                    } else if (_syntheticShapeIndex >= 0) {
+                        fileName = (_syntheticShapeIndex == 0) ? @"Circle_512" : @"Ellipse_512_y0.5x";
+                        printf("\n=== Shape: %s ===\n", fileName.UTF8String);
                     }
                     printf("Method\tTriCount\tTotalEdgeLength\tHelperSum\tHelperRatio\tTris/Tile Mean\tTris/Tile Med\tTris/Tile P95\tTiles/Tri Mean\tTiles/Tri Med\tTiles/Tri P95\tFrametime Mean\tFrametime Med\tFrametime Dev\n");
-                    for (int i = 0; i < 11; i++) {
-                        if (i == 3) continue;  // Skip CentroidFan
-                        BenchmarkResult& br = _benchmarkResults[i];
+                    // Output results in benchmark order: CDT, CDT flipped, Earcut, Earcut flipped, Greedy Max Area, MWT
+                    for (int i = 0; i < 6; i++) {
+                        int methodIdx = _benchmarkMethodIndices[i];
+                        BenchmarkResult& br = _benchmarkResults[methodIdx];
                         printf("%s\t%zu\t%.2f\t%llu\t%.3f\t%.2f\t%.2f\t%.2f\t%.2f\t%.2f\t%.2f\t%.3f\t%.3f\t%.3f\n",
-                               methodNames[i], br.triCount, br.totalEdgeLength, br.helperSum, br.helperRatio,
+                               methodNames[methodIdx], br.triCount, br.totalEdgeLength, br.helperSum, br.helperRatio,
                                br.trisPerTileMean, br.trisPerTileMed, br.trisPerTileP95,
                                br.tilesPerTriMean, br.tilesPerTriMed, br.tilesPerTriP95,
                                br.frametimeMean, br.frametimeMed, br.frametimeDev);
@@ -665,7 +833,7 @@ static inline double machTimeToMs(uint64_t start, uint64_t end) {
                         // Write to CSV if batch mode
                         if (_csvFile && fileName) {
                             fprintf(_csvFile, "%s,%s,%zu,%.2f,%llu,%.3f,%.2f,%.2f,%.2f,%.2f,%.2f,%.2f,%.3f,%.3f,%.3f\n",
-                                    fileName.UTF8String, methodNames[i], br.triCount, br.totalEdgeLength, br.helperSum, br.helperRatio,
+                                    fileName.UTF8String, methodNames[methodIdx], br.triCount, br.totalEdgeLength, br.helperSum, br.helperRatio,
                                     br.trisPerTileMean, br.trisPerTileMed, br.trisPerTileP95,
                                     br.tilesPerTriMean, br.tilesPerTriMed, br.tilesPerTriP95,
                                     br.frametimeMean, br.frametimeMed, br.frametimeDev);
@@ -674,7 +842,7 @@ static inline double machTimeToMs(uint64_t start, uint64_t end) {
                     }
                     printf("\n");
                     
-                    // Check if batch mode - move to next file
+                    // Check if batch mode - move to next file or synthetic shape
                     if (_batchFiles && _batchFileIndex >= 0) {
                         _batchFileIndex++;
                         if (_batchFileIndex < (int)_batchFiles.count) {
@@ -685,8 +853,20 @@ static inline double machTimeToMs(uint64_t start, uint64_t end) {
                             _benchmarkMethodIndex = 0;
                             _benchmarkPhase = 1;  // Skip reload phase, go straight to compute metrics (file already loaded)
                             memset(_benchmarkResults, 0, sizeof(_benchmarkResults));
+                        } else if (_batchIncludeSyntheticShapes && _syntheticShapeIndex < 0) {
+                            // Move to synthetic shapes (first one: circle)
+                            _syntheticShapeIndex = 0;
+                            _benchmarkMethodIndex = 0;
+                            _benchmarkPhase = 0;  // Start with reload phase for synthetic shape
+                            memset(_benchmarkResults, 0, sizeof(_benchmarkResults));
+                        } else if (_batchIncludeSyntheticShapes && _syntheticShapeIndex >= 0 && _syntheticShapeIndex < 1) {
+                            // Move to next synthetic shape (ellipse)
+                            _syntheticShapeIndex = 1;
+                            _benchmarkMethodIndex = 0;
+                            _benchmarkPhase = 0;  // Start with reload phase for synthetic shape
+                            memset(_benchmarkResults, 0, sizeof(_benchmarkResults));
                         } else {
-                            // Done with all files
+                            // Done with all files and synthetic shapes
                             printf("=== Batch benchmark complete ===\n\n");
                             if (_csvFile) {
                                 fclose(_csvFile);
@@ -697,6 +877,31 @@ static inline double machTimeToMs(uint64_t start, uint64_t end) {
                             _batchFiles = nil;
                             _batchFileIndex = -1;
                             _batchOutputFolder = nil;
+                            _batchIncludeSyntheticShapes = NO;
+                            _syntheticShapeIndex = -1;
+                        }
+                    } else if (_syntheticShapeIndex >= 0) {
+                        // Processing synthetic shapes (standalone, not in batch mode)
+                        if (_syntheticShapeIndex < 1) {
+                            // Move to next synthetic shape (ellipse)
+                            _syntheticShapeIndex = 1;
+                            _benchmarkMethodIndex = 0;
+                            _benchmarkPhase = 0;  // Start with reload phase for synthetic shape
+                            memset(_benchmarkResults, 0, sizeof(_benchmarkResults));
+                        } else {
+                            // Done with all synthetic shapes
+                            printf("=== Batch benchmark complete ===\n\n");
+                            if (_csvFile) {
+                                fclose(_csvFile);
+                                _csvFile = nullptr;
+                                printf("Results saved to: %s/benchmark_results.csv\n", _batchOutputFolder.UTF8String);
+                            }
+                            _benchmarkRunning = NO;
+                            _batchFiles = nil;
+                            _batchFileIndex = -1;
+                            _batchOutputFolder = nil;
+                            _batchIncludeSyntheticShapes = NO;
+                            _syntheticShapeIndex = -1;
                         }
                     } else {
                         // Single file benchmark done
@@ -772,6 +977,8 @@ static inline double machTimeToMs(uint64_t start, uint64_t end) {
         // Start batch benchmark with first file
         _batchFiles = svgFiles;
         _batchFileIndex = 0;
+        _batchIncludeSyntheticShapes = YES;  // Include circle and ellipse after SVGs
+        _syntheticShapeIndex = -1;  // Start with SVGs
         _benchmarkRunning = YES;
         _benchmarkMethodIndex = 0;
         _benchmarkPhase = 0;
@@ -782,7 +989,7 @@ static inline double machTimeToMs(uint64_t start, uint64_t end) {
         _currentSVGPath = firstFile;
         _shapeType = 0;  // Ensure SVG mode
         
-        printf("\n=== Starting batch benchmark: %zu files ===\n\n", svgFiles.count);
+        printf("\n=== Starting batch benchmark: %zu SVG files + 2 synthetic shapes ===\n\n", svgFiles.count);
     }
 }
 

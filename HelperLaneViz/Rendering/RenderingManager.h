@@ -48,6 +48,8 @@ NS_ASSUME_NONNULL_BEGIN
                       rows:(uint32_t)rows
           bezierDeviation:(float)bezierDev;
 
+- (void)setUseHelperTexture:(BOOL)use;
+
 - (void*)gpuFrameTimer;  // Returns GPUFrameTimer* (void* for Obj-C compatibility)
 
 @end

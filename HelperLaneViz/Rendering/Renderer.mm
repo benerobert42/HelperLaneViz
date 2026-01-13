@@ -160,6 +160,9 @@
                                          triangulationMethod:method
                                             instanceGridCols:cols
                                                     gridRows:rows];
+    }
+                  onHelperTextureChange:^(BOOL use) {
+        [self->_renderingManager setUseHelperTexture:use];
     }];
     
     // Set white background for print-friendly mode

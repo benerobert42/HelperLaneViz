@@ -45,6 +45,11 @@ NS_ASSUME_NONNULL_BEGIN
                     instanceGridCols:(uint32_t)cols
                             gridRows:(uint32_t)rows;
 
+- (void)loadGeometryFromVertices:(const std::vector<Vertex>&)vertices
+                          indices:(const std::vector<uint32_t>&)indices
+                 instanceGridCols:(uint32_t)cols
+                         gridRows:(uint32_t)rows;
+
 - (void)updateViewportSize:(vector_uint2)size;
 
 // Update instance grid without reloading geometry (for performance)
