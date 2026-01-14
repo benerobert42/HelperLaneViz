@@ -20,15 +20,16 @@
     MTKView *_view;
     
     id<MTLRenderPipelineState> _mainPipeline;
+    id<MTLRenderPipelineState> _mainPipelineNoTexture;
     id<MTLRenderPipelineState> _wireframePipeline;
     id<MTLRenderPipelineState> _overdrawPipeline;
     id<MTLRenderPipelineState> _printFriendlyPipeline;
+    id<MTLRenderPipelineState> _simpleTexturePipeline;
     id<MTLRenderPipelineState> _gridOverlayPipeline;
     
     GridOverlay *_gridOverlay;
     
     id<MTLTexture> _helperLaneTexture;
-    id<MTLTexture> _helperLaneTextureSmall;  // 1x1 fallback
     id<MTLSamplerState> _pointSampler;
     BOOL _useHelperTexture;
     
@@ -61,6 +62,9 @@
     _mainPipeline = MakeMainPipelineState(_device, _view, library, &error);
     NSAssert(_mainPipeline, @"Failed to create main pipeline: %@", error);
     
+    _mainPipelineNoTexture = MakeMainPipelineStateNoTexture(_device, _view, library, &error);
+    NSAssert(_mainPipelineNoTexture, @"Failed to create main pipeline (no texture): %@", error);
+    
     _wireframePipeline = MakeWireframePipelineState(_device, _view, library, &error);
     NSAssert(_wireframePipeline, @"Failed to create wireframe pipeline: %@", error);
     
@@ -69,6 +73,9 @@
     
     _printFriendlyPipeline = MakePrintFriendlyPipelineState(_device, _view, library, &error);
     NSAssert(_printFriendlyPipeline, @"Failed to create print friendly pipeline: %@", error);
+    
+    _simpleTexturePipeline = MakeSimpleTexturePipelineState(_device, _view, library, &error);
+    NSAssert(_simpleTexturePipeline, @"Failed to create simple texture pipeline: %@", error);
     
     _gridOverlayPipeline = MakeGridOverlayPipelineState(_device, _view, library, &error);
     NSAssert(_gridOverlayPipeline, @"Failed to create grid overlay pipeline: %@", error);
@@ -98,12 +105,6 @@
     memset(textureData, 255, textureSize * textureSize);  // All red (255)
     [_helperLaneTexture replaceRegion:MTLRegionMake2D(0, 0, textureSize, textureSize) mipmapLevel:0 withBytes:textureData bytesPerRow:textureSize];
     free(textureData);
-    
-    // Create 1x1 fallback texture
-    MTLTextureDescriptor *smallTexDesc = [MTLTextureDescriptor texture2DDescriptorWithPixelFormat:MTLPixelFormatR8Unorm width:1 height:1 mipmapped:NO];
-    _helperLaneTextureSmall = [_device newTextureWithDescriptor:smallTexDesc];
-    uint8_t red = 255;
-    [_helperLaneTextureSmall replaceRegion:MTLRegionMake2D(0, 0, 1, 1) mipmapLevel:0 withBytes:&red bytesPerRow:1];
     
     MTLSamplerDescriptor *samplerDesc = [MTLSamplerDescriptor new];
     samplerDesc.minFilter = MTLSamplerMinMagFilterNearest;
@@ -136,6 +137,11 @@
     [encoder setVertexBytes:&frameConstants length:sizeof(frameConstants) atIndex:VertexInputIndexFrameConstants];
     [encoder setVertexBytes:&gridParams length:sizeof(gridParams) atIndex:VertexInputGridParams];
     
+    // Also set frame constants for fragment shaders that need it (e.g., SimpleTexture)
+    if (mode == VisualizationModeSimpleTexture) {
+        [encoder setFragmentBytes:&frameConstants length:sizeof(frameConstants) atIndex:VertexInputIndexFrameConstants];
+    }
+    
     const NSUInteger indexCount = geometry.indexCount;
     const NSUInteger instanceCount = geometry.instanceCount;
     
@@ -150,11 +156,15 @@
     // Mode-specific setup
     switch (mode) {
         case VisualizationModeHelperLane:
-            [encoder setRenderPipelineState:_mainPipeline];
             [encoder setTriangleFillMode:MTLTriangleFillModeFill];
-            // Always bind a texture (2048x2048 when enabled, 1x1 when disabled)
-            [encoder setFragmentTexture:(_useHelperTexture ? _helperLaneTexture : _helperLaneTextureSmall) atIndex:0];
-            [encoder setFragmentSamplerState:_pointSampler atIndex:0];
+            // Use appropriate pipeline and bind texture only when enabled
+            if (_useHelperTexture) {
+                [encoder setRenderPipelineState:_mainPipeline];
+                [encoder setFragmentTexture:_helperLaneTexture atIndex:0];
+                [encoder setFragmentSamplerState:_pointSampler atIndex:0];
+            } else {
+                [encoder setRenderPipelineState:_mainPipelineNoTexture];
+            }
             break;
             
         case VisualizationModeWireframe:
@@ -170,6 +180,14 @@
         case VisualizationModePrintFriendly:
             [encoder setRenderPipelineState:_printFriendlyPipeline];
             [encoder setTriangleFillMode:MTLTriangleFillModeLines];
+            break;
+            
+        case VisualizationModeSimpleTexture:
+            [encoder setRenderPipelineState:_simpleTexturePipeline];
+            [encoder setTriangleFillMode:MTLTriangleFillModeFill];
+            // Bind the 2048x2048 texture and sampler
+            [encoder setFragmentTexture:_helperLaneTexture atIndex:0];
+            [encoder setFragmentSamplerState:_pointSampler atIndex:0];
             break;
     }
     

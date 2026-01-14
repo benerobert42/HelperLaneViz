@@ -49,6 +49,17 @@ id<MTLRenderPipelineState> MakeMainPipelineState(id<MTLDevice> device,
     return [device newRenderPipelineStateWithDescriptor:d error:error];
 }
 
+id<MTLRenderPipelineState> MakeMainPipelineStateNoTexture(id<MTLDevice> device,
+                                                          MTKView *view,
+                                                          id<MTLLibrary> library,
+                                                          NSError **error) {
+    MTLRenderPipelineDescriptor *d = CommonPipelineDescriptor(view);
+    d.label = @"MainPipelineNoTexture";
+    d.vertexFunction = [library newFunctionWithName:@"mainVS"];
+    d.fragmentFunction = [library newFunctionWithName:@"mainFSNoTexture"];
+    return [device newRenderPipelineStateWithDescriptor:d error:error];
+}
+
 id<MTLRenderPipelineState> MakeOverdrawPipelineState(id<MTLDevice> device,
                                                      MTKView *view,
                                                      id<MTLLibrary> library,
@@ -80,6 +91,17 @@ id<MTLRenderPipelineState> MakePrintFriendlyPipelineState(id<MTLDevice> device,
     d.label = @"PrintFriendlyPipeline";
     d.vertexFunction = [library newFunctionWithName:@"mainVS"];
     d.fragmentFunction = [library newFunctionWithName:@"printFriendlyFS"];
+    return [device newRenderPipelineStateWithDescriptor:d error:error];
+}
+
+id<MTLRenderPipelineState> MakeSimpleTexturePipelineState(id<MTLDevice> device,
+                                                          MTKView *view,
+                                                          id<MTLLibrary> library,
+                                                          NSError **error) {
+    MTLRenderPipelineDescriptor *d = CommonPipelineDescriptor(view);
+    d.label = @"SimpleTexturePipeline";
+    d.vertexFunction = [library newFunctionWithName:@"mainVS"];
+    d.fragmentFunction = [library newFunctionWithName:@"simpleTextureFS"];
     return [device newRenderPipelineStateWithDescriptor:d error:error];
 }
 

@@ -16,7 +16,8 @@ typedef NS_ENUM(NSInteger, VisualizationMode) {
     VisualizationModeHelperLane,
     VisualizationModeWireframe,
     VisualizationModeOverdraw,
-    VisualizationModePrintFriendly
+    VisualizationModePrintFriendly,
+    VisualizationModeSimpleTexture
 };
 
 NS_ASSUME_NONNULL_BEGIN

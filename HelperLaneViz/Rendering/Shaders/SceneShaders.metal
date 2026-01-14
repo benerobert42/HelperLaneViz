@@ -53,6 +53,26 @@ fragment float4 mainFS(MainVSOut in [[stage_in]],
     return kColors[clamp(sum, 0, 3)] + float4(dummy * 0.001);
 }
 
+fragment float4 mainFSNoTexture(MainVSOut in [[stage_in]]) {
+    // Version without texture - helper lane detection without texture sampling
+    const int isHelperThread = simd_is_helper_thread() ? 1 : 0;
+
+    const int sum =
+        quad_shuffle(isHelperThread, 0) +
+        quad_shuffle(isHelperThread, 1) +
+        quad_shuffle(isHelperThread, 2) +
+        quad_shuffle(isHelperThread, 3);
+
+    constexpr float4 kColors[4] = {
+        float4(0.0, 1.0, 0.0, 1.0),  // 0 helpers
+        float4(1.0, 1.0, 0.0, 1.0),  // 1
+        float4(1.0, 0.5, 0.1, 1.0),  // 2
+        float4(1.0, 0.0, 0.0, 1.0)   // 3
+    };
+
+    return kColors[clamp(sum, 0, 3)];
+}
+
 fragment float4 overdrawFS(MainVSOut in [[stage_in]]) {
     // Additive overdraw visualization, areas drawn multiple times become brighter
     return float4(0.05, 0.15, 0.05, 1.0);  // Subtle green per draw
@@ -66,4 +86,18 @@ fragment float4 wireframeFS(MainVSOut in [[stage_in]]) {
 fragment float4 printFriendlyFS(MainVSOut in [[stage_in]]) {
     // Red wireframe for print-friendly mode
     return float4(1.0, 0.0, 0.0, 1.0);
+}
+
+fragment float4 simpleTextureFS(MainVSOut in [[stage_in]],
+                                 texture2d<float> helperTex [[texture(0)]],
+                                 sampler smp [[sampler(0)]],
+                                 constant FrameConstants& frame [[buffer(VertexInputIndexFrameConstants)]]) {
+    // Sample texture at fragment position using screen coordinates
+    // Normalize screen position to [0,1] texture coordinates
+    float2 screenPos = float2(in.position.xy);
+    float2 texCoord = screenPos / float2(frame.viewPortSize);
+    
+    // Sample the texture and return as RGBA (texture is R8Unorm, so expand to RGB)
+    float texValue = helperTex.sample(smp, texCoord).r;
+    return float4(texValue, texValue, texValue, 1.0);
 }

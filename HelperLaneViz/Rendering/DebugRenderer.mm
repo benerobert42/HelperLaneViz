@@ -142,7 +142,7 @@ static inline double machTimeToMs(uint64_t start, uint64_t end) {
     // Initialize benchmark method indices in order: CDT, CDT flipped, Earcut, Earcut flipped, Greedy Max Area, MWT
     _benchmarkMethodIndices[0] = TriangulationMethodConstrainedDelaunay;  // CDT
     _benchmarkMethodIndices[1] = TriangulationMethodConstrainedDelaunayFlipped;  // CDT flipped
-    _benchmarkMethodIndices[2] = TriangulationMethodEarClipping;  // Earcut
+    _benchmarkMethodIndices[2] = TriangulationMethodEarClippingTriangulator;  // Earcut
     _benchmarkMethodIndices[3] = TriangulationMethodEarClippingTriangulatorFlipped;  // Earcut flipped
     _benchmarkMethodIndices[4] = TriangulationMethodGreedyMaxArea;  // Greedy Max Area
     _benchmarkMethodIndices[5] = TriangulationMethodMinimumWeight;  // MWT
@@ -237,9 +237,9 @@ static inline double machTimeToMs(uint64_t start, uint64_t end) {
     
     // Visualization Mode
     {
-        const char* vizModes[] = { "Helper Lane", "Wireframe", "Overdraw", "Print Friendly" };
+        const char* vizModes[] = { "Helper Lane", "Wireframe", "Overdraw", "Print Friendly", "Simple Texture" };
         int currentMode = (int)_visualizationMode;
-        if (ImGui::Combo("Visualization Mode", &currentMode, vizModes, 4)) {
+        if (ImGui::Combo("Visualization Mode", &currentMode, vizModes, 5)) {
             _visualizationMode = (VisualizationMode)currentMode;
         }
     }

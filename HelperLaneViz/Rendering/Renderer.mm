@@ -53,7 +53,7 @@
     _view.clearColor = MTLClearColorMake(0, 0, 0, 1);
     _view.depthStencilPixelFormat = MTLPixelFormatInvalid;
     
-    NSString *defaultSVGPath = @"/Users/robi/Downloads/2015076.svg";
+    NSString *defaultSVGPath = @"/Users/robert.bene/Downloads/2052150.svg";
     [self loadSVGFromPath:defaultSVGPath
       triangulationMethod:TriangulationMethodMinimumWeight
          instanceGridCols:5
