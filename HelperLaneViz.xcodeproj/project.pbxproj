@@ -7,18 +7,19 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
-		D00FBE122F06FE000012DC70 /* imgui_draw.cpp in Sources */ = {isa = PBXBuildFile; fileRef = D00FBE0D2F06FE000012DC70 /* imgui_draw.cpp */; };
-		D00FBE132F06FE000012DC70 /* imgui_demo.cpp in Sources */ = {isa = PBXBuildFile; fileRef = D00FBE0E2F06FE000012DC70 /* imgui_demo.cpp */; };
-		D00FBE142F06FE000012DC70 /* imgui.cpp in Sources */ = {isa = PBXBuildFile; fileRef = D00FBE0F2F06FE000012DC70 /* imgui.cpp */; };
-		D00FBE152F06FE000012DC70 /* imgui_tables.cpp in Sources */ = {isa = PBXBuildFile; fileRef = D00FBE102F06FE000012DC70 /* imgui_tables.cpp */; };
-		D00FBE162F06FE000012DC70 /* imgui_widgets.cpp in Sources */ = {isa = PBXBuildFile; fileRef = D00FBE112F06FE000012DC70 /* imgui_widgets.cpp */; };
-		D00FBE192F06FE1A0012DC70 /* imgui_impl_metal.h in Sources */ = {isa = PBXBuildFile; fileRef = D00FBE172F06FE1A0012DC70 /* imgui_impl_metal.h */; };
-		D00FBE1A2F06FE1A0012DC70 /* imgui_impl_osx.h in Sources */ = {isa = PBXBuildFile; fileRef = D00FBE182F06FE1A0012DC70 /* imgui_impl_osx.h */; };
-		D00FBE1D2F06FE410012DC70 /* imgui_impl_metal.mm in Sources */ = {isa = PBXBuildFile; fileRef = D00FBE1B2F06FE410012DC70 /* imgui_impl_metal.mm */; };
-		D00FBE1E2F06FE410012DC70 /* imgui_impl_osx.mm in Sources */ = {isa = PBXBuildFile; fileRef = D00FBE1C2F06FE410012DC70 /* imgui_impl_osx.mm */; };
-		D00FBE222F06FF700012DC70 /* nanosvg.h in Sources */ = {isa = PBXBuildFile; fileRef = D00FBE212F06FF700012DC70 /* nanosvg.h */; };
-		D00FBE242F06FFE80012DC70 /* triangle.h in Sources */ = {isa = PBXBuildFile; fileRef = D00FBE232F06FFE80012DC70 /* triangle.h */; };
-		D00FBE262F0700000012DC70 /* triangle.cpp in Sources */ = {isa = PBXBuildFile; fileRef = D00FBE252F0700000012DC70 /* triangle.cpp */; };
+		9BBCC1652F196778006897A0 /* allocator.cpp in Sources */ = {isa = PBXBuildFile; fileRef = 9BBCC15F2F196656006897A0 /* allocator.cpp */; };
+		9BBCC1662F196778006897A0 /* indexgenerator.cpp in Sources */ = {isa = PBXBuildFile; fileRef = 9BBCC1602F196656006897A0 /* indexgenerator.cpp */; };
+		9BBCC1672F196778006897A0 /* overdrawoptimizer.cpp in Sources */ = {isa = PBXBuildFile; fileRef = 9BBCC1622F196656006897A0 /* overdrawoptimizer.cpp */; };
+		9BBCC1682F196778006897A0 /* vcacheoptimizer.cpp in Sources */ = {isa = PBXBuildFile; fileRef = 9BBCC1632F196656006897A0 /* vcacheoptimizer.cpp */; };
+		9BBCC1692F196778006897A0 /* vfetchoptimizer.cpp in Sources */ = {isa = PBXBuildFile; fileRef = 9BBCC1642F196656006897A0 /* vfetchoptimizer.cpp */; };
+		9BBCC16A2F196778006897A0 /* imgui_impl_metal.mm in Sources */ = {isa = PBXBuildFile; fileRef = 9BBCC1592F1965A6006897A0 /* imgui_impl_metal.mm */; };
+		9BBCC16B2F196778006897A0 /* imgui_impl_osx.mm in Sources */ = {isa = PBXBuildFile; fileRef = 9BBCC15B2F1965A6006897A0 /* imgui_impl_osx.mm */; };
+		9BBCC16C2F196778006897A0 /* imgui.cpp in Sources */ = {isa = PBXBuildFile; fileRef = 9BBCC1532F19658D006897A0 /* imgui.cpp */; };
+		9BBCC16D2F196778006897A0 /* imgui_demo.cpp in Sources */ = {isa = PBXBuildFile; fileRef = 9BBCC1542F19658D006897A0 /* imgui_demo.cpp */; };
+		9BBCC16E2F196778006897A0 /* imgui_draw.cpp in Sources */ = {isa = PBXBuildFile; fileRef = 9BBCC1552F19658D006897A0 /* imgui_draw.cpp */; };
+		9BBCC16F2F196778006897A0 /* imgui_tables.cpp in Sources */ = {isa = PBXBuildFile; fileRef = 9BBCC1562F19658D006897A0 /* imgui_tables.cpp */; };
+		9BBCC1702F196778006897A0 /* imgui_widgets.cpp in Sources */ = {isa = PBXBuildFile; fileRef = 9BBCC1572F19658D006897A0 /* imgui_widgets.cpp */; };
+		9BBCC1712F196778006897A0 /* triangle.cpp in Sources */ = {isa = PBXBuildFile; fileRef = 9BBCC15D2F1965BA006897A0 /* triangle.cpp */; };
 		D05D34872EE763F300AD739A /* GameController.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = D05D34862EE763F300AD739A /* GameController.framework */; };
 /* End PBXBuildFile section */
 
@@ -40,18 +41,24 @@
 /* End PBXContainerItemProxy section */
 
 /* Begin PBXFileReference section */
-		D00FBE0D2F06FE000012DC70 /* imgui_draw.cpp */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.cpp.cpp; name = imgui_draw.cpp; path = ../../external/imgui/imgui_draw.cpp; sourceTree = "<group>"; };
-		D00FBE0E2F06FE000012DC70 /* imgui_demo.cpp */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.cpp.cpp; name = imgui_demo.cpp; path = ../../external/imgui/imgui_demo.cpp; sourceTree = "<group>"; };
-		D00FBE0F2F06FE000012DC70 /* imgui.cpp */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.cpp.cpp; name = imgui.cpp; path = ../../external/imgui/imgui.cpp; sourceTree = "<group>"; };
-		D00FBE102F06FE000012DC70 /* imgui_tables.cpp */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.cpp.cpp; name = imgui_tables.cpp; path = ../../external/imgui/imgui_tables.cpp; sourceTree = "<group>"; };
-		D00FBE112F06FE000012DC70 /* imgui_widgets.cpp */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.cpp.cpp; name = imgui_widgets.cpp; path = ../../external/imgui/imgui_widgets.cpp; sourceTree = "<group>"; };
-		D00FBE172F06FE1A0012DC70 /* imgui_impl_metal.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; name = imgui_impl_metal.h; path = ../../external/imgui/backends/imgui_impl_metal.h; sourceTree = "<group>"; };
-		D00FBE182F06FE1A0012DC70 /* imgui_impl_osx.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; name = imgui_impl_osx.h; path = ../../external/imgui/backends/imgui_impl_osx.h; sourceTree = "<group>"; };
-		D00FBE1B2F06FE410012DC70 /* imgui_impl_metal.mm */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.cpp.objcpp; name = imgui_impl_metal.mm; path = ../../external/imgui/backends/imgui_impl_metal.mm; sourceTree = "<group>"; };
-		D00FBE1C2F06FE410012DC70 /* imgui_impl_osx.mm */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.cpp.objcpp; name = imgui_impl_osx.mm; path = ../../external/imgui/backends/imgui_impl_osx.mm; sourceTree = "<group>"; };
-		D00FBE212F06FF700012DC70 /* nanosvg.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; name = nanosvg.h; path = ../../external/nanosvg/src/nanosvg.h; sourceTree = "<group>"; };
-		D00FBE232F06FFE80012DC70 /* triangle.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; name = triangle.h; path = ../../external/triangle/triangle.h; sourceTree = "<group>"; };
-		D00FBE252F0700000012DC70 /* triangle.cpp */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.cpp.cpp; name = triangle.cpp; path = ../../external/triangle/triangle.cpp; sourceTree = "<group>"; };
+		9BBCC1532F19658D006897A0 /* imgui.cpp */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.cpp.cpp; name = imgui.cpp; path = external/imgui/imgui.cpp; sourceTree = SOURCE_ROOT; };
+		9BBCC1542F19658D006897A0 /* imgui_demo.cpp */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.cpp.cpp; name = imgui_demo.cpp; path = external/imgui/imgui_demo.cpp; sourceTree = SOURCE_ROOT; };
+		9BBCC1552F19658D006897A0 /* imgui_draw.cpp */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.cpp.cpp; name = imgui_draw.cpp; path = external/imgui/imgui_draw.cpp; sourceTree = SOURCE_ROOT; };
+		9BBCC1562F19658D006897A0 /* imgui_tables.cpp */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.cpp.cpp; name = imgui_tables.cpp; path = external/imgui/imgui_tables.cpp; sourceTree = SOURCE_ROOT; };
+		9BBCC1572F19658D006897A0 /* imgui_widgets.cpp */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.cpp.cpp; name = imgui_widgets.cpp; path = external/imgui/imgui_widgets.cpp; sourceTree = SOURCE_ROOT; };
+		9BBCC1582F1965A6006897A0 /* imgui_impl_metal.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; name = imgui_impl_metal.h; path = external/imgui/backends/imgui_impl_metal.h; sourceTree = SOURCE_ROOT; };
+		9BBCC1592F1965A6006897A0 /* imgui_impl_metal.mm */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.cpp.objcpp; name = imgui_impl_metal.mm; path = external/imgui/backends/imgui_impl_metal.mm; sourceTree = SOURCE_ROOT; };
+		9BBCC15A2F1965A6006897A0 /* imgui_impl_osx.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; name = imgui_impl_osx.h; path = external/imgui/backends/imgui_impl_osx.h; sourceTree = SOURCE_ROOT; };
+		9BBCC15B2F1965A6006897A0 /* imgui_impl_osx.mm */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.cpp.objcpp; name = imgui_impl_osx.mm; path = external/imgui/backends/imgui_impl_osx.mm; sourceTree = SOURCE_ROOT; };
+		9BBCC15C2F1965BA006897A0 /* triangle.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; name = triangle.h; path = external/triangle/triangle.h; sourceTree = SOURCE_ROOT; };
+		9BBCC15D2F1965BA006897A0 /* triangle.cpp */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.cpp.cpp; name = triangle.cpp; path = external/triangle/triangle.cpp; sourceTree = SOURCE_ROOT; };
+		9BBCC15E2F1965CA006897A0 /* nanosvg.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; name = nanosvg.h; path = external/nanosvg/src/nanosvg.h; sourceTree = SOURCE_ROOT; };
+		9BBCC15F2F196656006897A0 /* allocator.cpp */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.cpp.cpp; name = allocator.cpp; path = external/meshoptimizer/src/allocator.cpp; sourceTree = SOURCE_ROOT; };
+		9BBCC1602F196656006897A0 /* indexgenerator.cpp */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.cpp.cpp; name = indexgenerator.cpp; path = external/meshoptimizer/src/indexgenerator.cpp; sourceTree = SOURCE_ROOT; };
+		9BBCC1612F196656006897A0 /* meshoptimizer.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; name = meshoptimizer.h; path = external/meshoptimizer/src/meshoptimizer.h; sourceTree = SOURCE_ROOT; };
+		9BBCC1622F196656006897A0 /* overdrawoptimizer.cpp */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.cpp.cpp; name = overdrawoptimizer.cpp; path = external/meshoptimizer/src/overdrawoptimizer.cpp; sourceTree = SOURCE_ROOT; };
+		9BBCC1632F196656006897A0 /* vcacheoptimizer.cpp */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.cpp.cpp; name = vcacheoptimizer.cpp; path = external/meshoptimizer/src/vcacheoptimizer.cpp; sourceTree = SOURCE_ROOT; };
+		9BBCC1642F196656006897A0 /* vfetchoptimizer.cpp */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.cpp.cpp; name = vfetchoptimizer.cpp; path = external/meshoptimizer/src/vfetchoptimizer.cpp; sourceTree = SOURCE_ROOT; };
 		D05D34862EE763F300AD739A /* GameController.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = GameController.framework; path = System/Library/Frameworks/GameController.framework; sourceTree = SDKROOT; };
 		D0B410A12E50A32E005C8023 /* HelperLaneViz.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = HelperLaneViz.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		D0B410B62E50A32F005C8023 /* HelperLaneVizTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = HelperLaneVizTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
@@ -102,47 +109,61 @@
 /* End PBXFrameworksBuildPhase section */
 
 /* Begin PBXGroup section */
-		D00FBE1F2F06FE770012DC70 /* Libraries */ = {
+		9BBCC14E2F196558006897A0 /* Libraries */ = {
 			isa = PBXGroup;
 			children = (
-				D00FBE282F07002F0012DC70 /* nanosvg */,
-				D00FBE272F0700240012DC70 /* triangle */,
-				D00FBE202F06FF2D0012DC70 /* ImGUI */,
+				9BBCC1522F196574006897A0 /* meshoptimiser */,
+				9BBCC1512F19656D006897A0 /* ImGUI */,
+				9BBCC1502F196567006897A0 /* triangle */,
+				9BBCC14F2F19655E006897A0 /* nanosvg */,
 			);
 			path = Libraries;
 			sourceTree = "<group>";
 		};
-		D00FBE202F06FF2D0012DC70 /* ImGUI */ = {
+		9BBCC14F2F19655E006897A0 /* nanosvg */ = {
 			isa = PBXGroup;
 			children = (
-				D00FBE1B2F06FE410012DC70 /* imgui_impl_metal.mm */,
-				D00FBE1C2F06FE410012DC70 /* imgui_impl_osx.mm */,
-				D00FBE172F06FE1A0012DC70 /* imgui_impl_metal.h */,
-				D00FBE182F06FE1A0012DC70 /* imgui_impl_osx.h */,
-				D00FBE0F2F06FE000012DC70 /* imgui.cpp */,
-				D00FBE0E2F06FE000012DC70 /* imgui_demo.cpp */,
-				D00FBE0D2F06FE000012DC70 /* imgui_draw.cpp */,
-				D00FBE102F06FE000012DC70 /* imgui_tables.cpp */,
-				D00FBE112F06FE000012DC70 /* imgui_widgets.cpp */,
+				9BBCC15E2F1965CA006897A0 /* nanosvg.h */,
 			);
-			path = ImGUI;
+			path = nanosvg;
 			sourceTree = "<group>";
 		};
-		D00FBE272F0700240012DC70 /* triangle */ = {
+		9BBCC1502F196567006897A0 /* triangle */ = {
 			isa = PBXGroup;
 			children = (
-				D00FBE252F0700000012DC70 /* triangle.cpp */,
-				D00FBE232F06FFE80012DC70 /* triangle.h */,
+				9BBCC15C2F1965BA006897A0 /* triangle.h */,
+				9BBCC15D2F1965BA006897A0 /* triangle.cpp */,
 			);
 			path = triangle;
 			sourceTree = "<group>";
 		};
-		D00FBE282F07002F0012DC70 /* nanosvg */ = {
+		9BBCC1512F19656D006897A0 /* ImGUI */ = {
 			isa = PBXGroup;
 			children = (
-				D00FBE212F06FF700012DC70 /* nanosvg.h */,
+				9BBCC1582F1965A6006897A0 /* imgui_impl_metal.h */,
+				9BBCC1592F1965A6006897A0 /* imgui_impl_metal.mm */,
+				9BBCC15A2F1965A6006897A0 /* imgui_impl_osx.h */,
+				9BBCC15B2F1965A6006897A0 /* imgui_impl_osx.mm */,
+				9BBCC1532F19658D006897A0 /* imgui.cpp */,
+				9BBCC1542F19658D006897A0 /* imgui_demo.cpp */,
+				9BBCC1552F19658D006897A0 /* imgui_draw.cpp */,
+				9BBCC1562F19658D006897A0 /* imgui_tables.cpp */,
+				9BBCC1572F19658D006897A0 /* imgui_widgets.cpp */,
 			);
-			path = nanosvg;
+			path = ImGUI;
+			sourceTree = "<group>";
+		};
+		9BBCC1522F196574006897A0 /* meshoptimiser */ = {
+			isa = PBXGroup;
+			children = (
+				9BBCC15F2F196656006897A0 /* allocator.cpp */,
+				9BBCC1602F196656006897A0 /* indexgenerator.cpp */,
+				9BBCC1612F196656006897A0 /* meshoptimizer.h */,
+				9BBCC1622F196656006897A0 /* overdrawoptimizer.cpp */,
+				9BBCC1632F196656006897A0 /* vcacheoptimizer.cpp */,
+				9BBCC1642F196656006897A0 /* vfetchoptimizer.cpp */,
+			);
+			path = meshoptimiser;
 			sourceTree = "<group>";
 		};
 		D05D34852EE763F300AD739A /* Frameworks */ = {
@@ -156,7 +177,7 @@
 		D0B410982E50A32E005C8023 = {
 			isa = PBXGroup;
 			children = (
-				D00FBE1F2F06FE770012DC70 /* Libraries */,
+				9BBCC14E2F196558006897A0 /* Libraries */,
 				D0B410A32E50A32E005C8023 /* HelperLaneViz */,
 				D0B410B92E50A32F005C8023 /* HelperLaneVizTests */,
 				D0B410C32E50A32F005C8023 /* HelperLaneVizUITests */,
@@ -319,18 +340,19 @@
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
-				D00FBE262F0700000012DC70 /* triangle.cpp in Sources */,
-				D00FBE242F06FFE80012DC70 /* triangle.h in Sources */,
-				D00FBE222F06FF700012DC70 /* nanosvg.h in Sources */,
-				D00FBE1D2F06FE410012DC70 /* imgui_impl_metal.mm in Sources */,
-				D00FBE1E2F06FE410012DC70 /* imgui_impl_osx.mm in Sources */,
-				D00FBE192F06FE1A0012DC70 /* imgui_impl_metal.h in Sources */,
-				D00FBE1A2F06FE1A0012DC70 /* imgui_impl_osx.h in Sources */,
-				D00FBE122F06FE000012DC70 /* imgui_draw.cpp in Sources */,
-				D00FBE132F06FE000012DC70 /* imgui_demo.cpp in Sources */,
-				D00FBE142F06FE000012DC70 /* imgui.cpp in Sources */,
-				D00FBE152F06FE000012DC70 /* imgui_tables.cpp in Sources */,
-				D00FBE162F06FE000012DC70 /* imgui_widgets.cpp in Sources */,
+				9BBCC1652F196778006897A0 /* allocator.cpp in Sources */,
+				9BBCC1662F196778006897A0 /* indexgenerator.cpp in Sources */,
+				9BBCC1672F196778006897A0 /* overdrawoptimizer.cpp in Sources */,
+				9BBCC1682F196778006897A0 /* vcacheoptimizer.cpp in Sources */,
+				9BBCC1692F196778006897A0 /* vfetchoptimizer.cpp in Sources */,
+				9BBCC16A2F196778006897A0 /* imgui_impl_metal.mm in Sources */,
+				9BBCC16B2F196778006897A0 /* imgui_impl_osx.mm in Sources */,
+				9BBCC16C2F196778006897A0 /* imgui.cpp in Sources */,
+				9BBCC16D2F196778006897A0 /* imgui_demo.cpp in Sources */,
+				9BBCC16E2F196778006897A0 /* imgui_draw.cpp in Sources */,
+				9BBCC16F2F196778006897A0 /* imgui_tables.cpp in Sources */,
+				9BBCC1702F196778006897A0 /* imgui_widgets.cpp in Sources */,
+				9BBCC1712F196778006897A0 /* triangle.cpp in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -497,7 +519,8 @@
 					"$(SRCROOT)/external/triangulator/include",
 					/opt/homebrew/include,
 					"$(SRCROOT)/external/imgui/**",
-					"$(SRCROOT)/external/earcut/**",
+					"$(SRCROOT)/external/earcut/include",
+					"$(SRCROOT)/external/meshoptimizer/src",
 				);
 				INFOPLIST_KEY_NSHumanReadableCopyright = "";
 				INFOPLIST_KEY_NSMainStoryboardFile = Main;
@@ -547,7 +570,8 @@
 					"$(SRCROOT)/external/triangulator/include",
 					/opt/homebrew/include,
 					"$(SRCROOT)/external/imgui/**",
-					"$(SRCROOT)/external/earcut/**",
+					"$(SRCROOT)/external/earcut/include",
+					"$(SRCROOT)/external/meshoptimizer/src",
 				);
 				INFOPLIST_KEY_NSHumanReadableCopyright = "";
 				INFOPLIST_KEY_NSMainStoryboardFile = Main;
