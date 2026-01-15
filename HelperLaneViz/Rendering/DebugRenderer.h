@@ -35,8 +35,8 @@ NS_ASSUME_NONNULL_BEGIN
 // Render all debug UI windows
 - (void)renderUIWithGeometry:(GeometryManager *)geometry
                       metrics:(MetricsComputer *)metrics
-              onGeometryReload:(void(^)(NSString *path, TriangulationMethod method, uint32_t cols, uint32_t rows, float bezierDev))reloadBlock
-               onEllipseReload:(void(^)(float axisRatio, int vertexCount, TriangulationMethod method, uint32_t cols, uint32_t rows))ellipseBlock
+              onGeometryReload:(void(^)(NSString *path, TriangulationMethod method, uint32_t cols, uint32_t rows, float bezierDev, BOOL useMeshOpt))reloadBlock
+               onEllipseReload:(void(^)(float axisRatio, int vertexCount, TriangulationMethod method, uint32_t cols, uint32_t rows, BOOL useMeshOpt))ellipseBlock
             onHelperTextureChange:(void(^)(BOOL use))helperTextureBlock;
 
 // Render ImGUI draw data to the command encoder (call after renderUI)

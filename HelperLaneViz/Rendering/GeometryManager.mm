@@ -54,7 +54,8 @@
     triangulationMethod:(TriangulationMethod)method
        instanceGridCols:(uint32_t)cols
                gridRows:(uint32_t)rows
-    bezierMaxDeviationPx:(float)bezierMaxDeviationPx {
+    bezierMaxDeviationPx:(float)bezierMaxDeviationPx
+       useMeshOptimizer:(BOOL)useMeshOptimizer {
     
     // Create triangulator that uses the selected method
     SVGLoader::Triangulator triangulator = [self, method](const std::vector<Vertex>& verts, bool shouldHandleConcave) -> std::vector<uint32_t> {
@@ -74,6 +75,11 @@
         return NO;
     }
     
+    // Apply meshoptimizer if enabled
+    if (useMeshOptimizer) {
+        Triangulation::OptimizeWithMeshOptimizer(vertices, indices);
+    }
+    
     _currentVertices = vertices;
     _currentIndices = indices;
     
@@ -81,8 +87,8 @@
     [self setupOrthographicProjection];
     [self setupInstanceGridWithCols:cols rows:rows];
     
-    NSLog(@"Loaded SVG: %@ (%zu vertices, %zu triangles, method=%ld, grid=%dx%d)",
-          path, vertices.size(), indices.size() / 3, (long)method, cols, rows);
+    NSLog(@"Loaded SVG: %@ (%zu vertices, %zu triangles, method=%ld, grid=%dx%d, meshopt=%d)",
+          path, vertices.size(), indices.size() / 3, (long)method, cols, rows, useMeshOptimizer);
     
     return YES;
 }
@@ -91,7 +97,8 @@
                          vertexCount:(int)vertexCount
                  triangulationMethod:(TriangulationMethod)method
                     instanceGridCols:(uint32_t)cols
-                            gridRows:(uint32_t)rows {
+                            gridRows:(uint32_t)rows
+                    useMeshOptimizer:(BOOL)useMeshOptimizer {
     
     // Generate ellipse vertices (centered at origin, major axis = 1.0)
     const int segments = MAX(3, vertexCount);
@@ -116,6 +123,11 @@
         return NO;
     }
     
+    // Apply meshoptimizer if enabled
+    if (useMeshOptimizer) {
+        Triangulation::OptimizeWithMeshOptimizer(vertices, indices);
+    }
+    
     _currentVertices = vertices;
     _currentIndices = indices;
     
@@ -123,8 +135,8 @@
     [self setupOrthographicProjection];
     [self setupInstanceGridWithCols:cols rows:rows];
     
-    NSLog(@"Generated ellipse (ratio=%.2f, %zu vertices, %zu triangles, method=%ld, grid=%dx%d)",
-          axisRatio, vertices.size(), indices.size() / 3, (long)method, cols, rows);
+    NSLog(@"Generated ellipse (ratio=%.2f, %zu vertices, %zu triangles, method=%ld, grid=%dx%d, meshopt=%d)",
+          axisRatio, vertices.size(), indices.size() / 3, (long)method, cols, rows, useMeshOptimizer);
     
     return YES;
 }
@@ -240,8 +252,12 @@
         case TriangulationMethodConstrainedDelaunayFlipped:
             indices = Triangulation::ConstrainedDelaunayWithEdgeFlips(mutableVerts);
             break;
+            
+        default:
+            NSAssert(NO, @"Unknown triangulation method: %ld", (long)method);
+            break;
     }
-    
+
     return indices;
 }
 

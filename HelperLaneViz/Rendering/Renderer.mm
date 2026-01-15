@@ -58,7 +58,8 @@
       triangulationMethod:TriangulationMethodMinimumWeight
          instanceGridCols:5
                  gridRows:5
-    bezierMaxDeviationPx:1.0f];
+    bezierMaxDeviationPx:1.0f
+       useMeshOptimizer:NO];
     
     return self;
 }
@@ -69,12 +70,14 @@
     triangulationMethod:(TriangulationMethod)method
        instanceGridCols:(uint32_t)cols
                gridRows:(uint32_t)rows
-    bezierMaxDeviationPx:(float)bezierMaxDeviationPx {
+    bezierMaxDeviationPx:(float)bezierMaxDeviationPx
+       useMeshOptimizer:(BOOL)useMeshOptimizer {
     BOOL success = [_geometryManager loadSVGFromPath:path
                                   triangulationMethod:method
                                      instanceGridCols:cols
                                              gridRows:rows
-                                  bezierMaxDeviationPx:bezierMaxDeviationPx];
+                                  bezierMaxDeviationPx:bezierMaxDeviationPx
+                                     useMeshOptimizer:useMeshOptimizer];
     
     if (success) {
         [_renderingManager setCurrentSVGPath:path
@@ -143,23 +146,27 @@
                                           TriangulationMethod method,
                                           uint32_t cols,
                                           uint32_t rows,
-                                          float bezierDev) {
+                                          float bezierDev,
+                                          BOOL useMeshOpt) {
         [self->_geometryManager loadSVGFromPath:path
                             triangulationMethod:method
                                instanceGridCols:cols
                                        gridRows:rows
-                           bezierMaxDeviationPx:bezierDev];
+                           bezierMaxDeviationPx:bezierDev
+                               useMeshOptimizer:useMeshOpt];
     }
                          onEllipseReload:^(float axisRatio,
                                           int vertexCount,
                                           TriangulationMethod method,
                                           uint32_t cols,
-                                          uint32_t rows) {
+                                          uint32_t rows,
+                                          BOOL useMeshOpt) {
         [self->_geometryManager generateEllipseWithAxisRatio:axisRatio
                                                  vertexCount:vertexCount
                                          triangulationMethod:method
                                             instanceGridCols:cols
-                                                    gridRows:rows];
+                                                    gridRows:rows
+                                            useMeshOptimizer:useMeshOpt];
     }
                   onHelperTextureChange:^(BOOL use) {
         [self->_renderingManager setUseHelperTexture:use];

@@ -105,6 +105,9 @@ static inline double machTimeToMs(uint64_t start, uint64_t end) {
     
     // Helper texture usage
     BOOL _useHelperTexture;
+    
+    // MeshOptimizer usage
+    BOOL _useMeshOptimizer;
 }
 
 - (instancetype)initWithDevice:(id<MTLDevice>)device view:(MTKView *)view {
@@ -138,6 +141,7 @@ static inline double machTimeToMs(uint64_t start, uint64_t end) {
     _batchIncludeSyntheticShapes = NO;
     _syntheticShapeIndex = -1;
     _displaySize = CGSizeZero;
+    _useMeshOptimizer = NO;
     
     // Initialize benchmark method indices in order: CDT, CDT flipped, Earcut, Earcut flipped, Greedy Max Area, MWT
     _benchmarkMethodIndices[0] = TriangulationMethodConstrainedDelaunay;  // CDT
@@ -228,8 +232,8 @@ static inline double machTimeToMs(uint64_t start, uint64_t end) {
 
 - (void)renderUIWithGeometry:(GeometryManager *)geometry
                       metrics:(MetricsComputer *)metrics
-              onGeometryReload:(void(^)(NSString *path, TriangulationMethod method, uint32_t cols, uint32_t rows, float bezierDev))reloadBlock
-               onEllipseReload:(void(^)(float axisRatio, int vertexCount, TriangulationMethod method, uint32_t cols, uint32_t rows))ellipseBlock
+              onGeometryReload:(void(^)(NSString *path, TriangulationMethod method, uint32_t cols, uint32_t rows, float bezierDev, BOOL useMeshOpt))reloadBlock
+               onEllipseReload:(void(^)(float axisRatio, int vertexCount, TriangulationMethod method, uint32_t cols, uint32_t rows, BOOL useMeshOpt))ellipseBlock
             onHelperTextureChange:(void(^)(BOOL use))helperTextureBlock {
     
     // Main UI: visualization controls + metrics
@@ -290,6 +294,20 @@ static inline double machTimeToMs(uint64_t start, uint64_t end) {
         }
     }
     
+    // MeshOptimizer toggle
+    {
+        bool useMeshOpt = _useMeshOptimizer;
+        if (ImGui::Checkbox("Use MeshOptimizer", &useMeshOpt)) {
+            _useMeshOptimizer = useMeshOpt ? YES : NO;
+            // Reload geometry with new setting
+            if (_shapeType == 0 && _currentSVGPath) {
+                reloadBlock(_currentSVGPath, _currentTriangulationMethod, _instanceGridCols, _instanceGridRows, _bezierMaxDeviationPx, _useMeshOptimizer);
+            } else if (_shapeType == 1) {
+                ellipseBlock(_ellipseAxisRatio, _ellipseVertexCount, _currentTriangulationMethod, _instanceGridCols, _instanceGridRows, _useMeshOptimizer);
+            }
+        }
+    }
+    
     ImGui::Separator();
     ImGui::Text("Window Settings");
     
@@ -322,9 +340,9 @@ static inline double machTimeToMs(uint64_t start, uint64_t end) {
         const char* shapeTypes[] = { "SVG File", "Ellipse" };
         if (ImGui::Combo("Shape Type", &_shapeType, shapeTypes, 2)) {
             if (_shapeType == 0 && _currentSVGPath) {
-                reloadBlock(_currentSVGPath, _currentTriangulationMethod, _instanceGridCols, _instanceGridRows, _bezierMaxDeviationPx);
+                reloadBlock(_currentSVGPath, _currentTriangulationMethod, _instanceGridCols, _instanceGridRows, _bezierMaxDeviationPx, _useMeshOptimizer);
             } else if (_shapeType == 1) {
-                ellipseBlock(_ellipseAxisRatio, _ellipseVertexCount, _currentTriangulationMethod, _instanceGridCols, _instanceGridRows);
+                ellipseBlock(_ellipseAxisRatio, _ellipseVertexCount, _currentTriangulationMethod, _instanceGridCols, _instanceGridRows, _useMeshOptimizer);
             }
         }
     }
@@ -332,11 +350,11 @@ static inline double machTimeToMs(uint64_t start, uint64_t end) {
     // Ellipse settings (only shown when Ellipse is selected)
     if (_shapeType == 1) {
         if (ImGui::SliderFloat("Axis Ratio (minor/major)", &_ellipseAxisRatio, 0.1f, 1.0f, "%.2f")) {
-            ellipseBlock(_ellipseAxisRatio, _ellipseVertexCount, _currentTriangulationMethod, _instanceGridCols, _instanceGridRows);
+            ellipseBlock(_ellipseAxisRatio, _ellipseVertexCount, _currentTriangulationMethod, _instanceGridCols, _instanceGridRows, _useMeshOptimizer);
         }
         if (ImGui::InputInt("Vertex Count", &_ellipseVertexCount, 1, 10)) {
             _ellipseVertexCount = MAX(3, _ellipseVertexCount);
-            ellipseBlock(_ellipseAxisRatio, _ellipseVertexCount, _currentTriangulationMethod, _instanceGridCols, _instanceGridRows);
+            ellipseBlock(_ellipseAxisRatio, _ellipseVertexCount, _currentTriangulationMethod, _instanceGridCols, _instanceGridRows, _useMeshOptimizer);
         }
     }
     
@@ -359,9 +377,9 @@ static inline double machTimeToMs(uint64_t start, uint64_t end) {
         if (ImGui::Combo("Triangulation Method", &currentMethod, triMethods, 11)) {
             _currentTriangulationMethod = (TriangulationMethod)currentMethod;
             if (_shapeType == 0 && _currentSVGPath) {
-                reloadBlock(_currentSVGPath, _currentTriangulationMethod, _instanceGridCols, _instanceGridRows, _bezierMaxDeviationPx);
+                reloadBlock(_currentSVGPath, _currentTriangulationMethod, _instanceGridCols, _instanceGridRows, _bezierMaxDeviationPx, _useMeshOptimizer);
             } else if (_shapeType == 1) {
-                ellipseBlock(_ellipseAxisRatio, _ellipseVertexCount, _currentTriangulationMethod, _instanceGridCols, _instanceGridRows);
+                ellipseBlock(_ellipseAxisRatio, _ellipseVertexCount, _currentTriangulationMethod, _instanceGridCols, _instanceGridRows, _useMeshOptimizer);
             }
         }
     }
@@ -393,7 +411,7 @@ static inline double machTimeToMs(uint64_t start, uint64_t end) {
         if (ImGui::SliderFloat("Max Bezier Deviation (px)", &bezierDev, 0.05f, 5.0f, "%.2f")) {
             _bezierMaxDeviationPx = bezierDev;
             if (_currentSVGPath) {
-                reloadBlock(_currentSVGPath, _currentTriangulationMethod, _instanceGridCols, _instanceGridRows, _bezierMaxDeviationPx);
+                reloadBlock(_currentSVGPath, _currentTriangulationMethod, _instanceGridCols, _instanceGridRows, _bezierMaxDeviationPx, _useMeshOptimizer);
             }
         }
     }
@@ -650,8 +668,8 @@ static inline double machTimeToMs(uint64_t start, uint64_t end) {
 
 - (void)runBenchmarkStepWithGeometry:(GeometryManager *)geometry
                              metrics:(MetricsComputer *)metrics
-                         reloadBlock:(void(^)(NSString *, TriangulationMethod, uint32_t, uint32_t, float))reloadBlock
-                        ellipseBlock:(void(^)(float, int, TriangulationMethod, uint32_t, uint32_t))ellipseBlock {
+                         reloadBlock:(void(^)(NSString *, TriangulationMethod, uint32_t, uint32_t, float, BOOL))reloadBlock
+                        ellipseBlock:(void(^)(float, int, TriangulationMethod, uint32_t, uint32_t, BOOL))ellipseBlock {
     
     const char* methodNames[] =
         {"EarClipping", "EarClippingTriangulator", "EarClippingTriangulatorFlipped", "CentroidFan", "Strip", "GreedyMaxArea", "MinWeight", "MaxMinArea", "MinMaxArea", "ConstrainedDelaunay", "ConstrainedDelaunayFlipped"};
@@ -708,12 +726,20 @@ static inline double machTimeToMs(uint64_t start, uint64_t end) {
                     case TriangulationMethodConstrainedDelaunayFlipped:
                         indices = Triangulation::ConstrainedDelaunayWithEdgeFlips(vertices);
                         break;
+                    default:
+                        NSAssert(NO, @"Unknown triangulation method: %d", actualMethodIndex);
+                        break;
                 }
                 
                 // Assert that triangulation succeeded - crash if it failed
                 NSAssert(!indices.empty() && vertices.size() >= 3, 
                         @"Triangulation failed for synthetic shape: method=%d, shape=%d, vertices=%zu, indices=%zu", 
                         actualMethodIndex, _syntheticShapeIndex, vertices.size(), indices.size());
+                
+                // Apply meshoptimizer if enabled
+                if (_useMeshOptimizer) {
+                    Triangulation::OptimizeWithMeshOptimizer(vertices, indices);
+                }
                 
                 // Upload geometry to GeometryManager
                 [geometry loadGeometryFromVertices:vertices indices:indices instanceGridCols:_instanceGridCols gridRows:_instanceGridRows];
@@ -722,13 +748,15 @@ static inline double machTimeToMs(uint64_t start, uint64_t end) {
                             (TriangulationMethod)actualMethodIndex,
                             _instanceGridCols,
                             _instanceGridRows,
-                            _bezierMaxDeviationPx);
+                            _bezierMaxDeviationPx,
+                            _useMeshOptimizer);
             } else if (_shapeType == 1) {
                 ellipseBlock(_ellipseAxisRatio,
                              _ellipseVertexCount,
                              (TriangulationMethod)actualMethodIndex,
                              _instanceGridCols,
-                             _instanceGridRows);
+                             _instanceGridRows,
+                             _useMeshOptimizer);
             }
             _benchmarkPhase = 1;
             break;
@@ -848,7 +876,7 @@ static inline double machTimeToMs(uint64_t start, uint64_t end) {
                         if (_batchFileIndex < (int)_batchFiles.count) {
                             // Load next file and restart benchmark
                             NSString *nextFile = _batchFiles[_batchFileIndex];
-                            reloadBlock(nextFile, (TriangulationMethod)0, _instanceGridCols, _instanceGridRows, _bezierMaxDeviationPx);
+                            reloadBlock(nextFile, (TriangulationMethod)0, _instanceGridCols, _instanceGridRows, _bezierMaxDeviationPx, _useMeshOptimizer);
                             _currentSVGPath = nextFile;
                             _benchmarkMethodIndex = 0;
                             _benchmarkPhase = 1;  // Skip reload phase, go straight to compute metrics (file already loaded)
@@ -915,7 +943,7 @@ static inline double machTimeToMs(uint64_t start, uint64_t end) {
     }
 }
 
-- (void)selectFolderAndStartBatchBenchmark:(void(^)(NSString *path, TriangulationMethod method, uint32_t cols, uint32_t rows, float bezierDev))reloadBlock {
+- (void)selectFolderAndStartBatchBenchmark:(void(^)(NSString *path, TriangulationMethod method, uint32_t cols, uint32_t rows, float bezierDev, BOOL useMeshOpt))reloadBlock {
     NSOpenPanel *panel = [NSOpenPanel openPanel];
     panel.canChooseFiles = NO;
     panel.canChooseDirectories = YES;
@@ -985,7 +1013,7 @@ static inline double machTimeToMs(uint64_t start, uint64_t end) {
         memset(_benchmarkResults, 0, sizeof(_benchmarkResults));
         
         NSString *firstFile = _batchFiles[0];
-        reloadBlock(firstFile, (TriangulationMethod)0, _instanceGridCols, _instanceGridRows, _bezierMaxDeviationPx);
+        reloadBlock(firstFile, (TriangulationMethod)0, _instanceGridCols, _instanceGridRows, _bezierMaxDeviationPx, _useMeshOptimizer);
         _currentSVGPath = firstFile;
         _shapeType = 0;  // Ensure SVG mode
         

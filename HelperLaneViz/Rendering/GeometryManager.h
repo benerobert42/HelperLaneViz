@@ -37,13 +37,15 @@ NS_ASSUME_NONNULL_BEGIN
     triangulationMethod:(TriangulationMethod)method
        instanceGridCols:(uint32_t)cols
                gridRows:(uint32_t)rows
-    bezierMaxDeviationPx:(float)bezierMaxDeviationPx;
+    bezierMaxDeviationPx:(float)bezierMaxDeviationPx
+       useMeshOptimizer:(BOOL)useMeshOptimizer;
 
 - (BOOL)generateEllipseWithAxisRatio:(float)axisRatio
                          vertexCount:(int)vertexCount
                  triangulationMethod:(TriangulationMethod)method
                     instanceGridCols:(uint32_t)cols
-                            gridRows:(uint32_t)rows;
+                            gridRows:(uint32_t)rows
+                    useMeshOptimizer:(BOOL)useMeshOptimizer;
 
 - (void)loadGeometryFromVertices:(const std::vector<Vertex>&)vertices
                           indices:(const std::vector<uint32_t>&)indices

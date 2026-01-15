@@ -44,7 +44,8 @@ typedef NS_ENUM(NSInteger, VisualizationMode) {
     triangulationMethod:(TriangulationMethod)method
        instanceGridCols:(uint32_t)cols
                gridRows:(uint32_t)rows
-    bezierMaxDeviationPx:(float)bezierMaxDeviationPx;
+    bezierMaxDeviationPx:(float)bezierMaxDeviationPx
+       useMeshOptimizer:(BOOL)useMeshOptimizer;
 
 // Compute overdraw metrics using GPU rasterization (accurate)
 // Returns total pixel draws and overdraw ratio (totalDraws / uniquePixels)

@@ -16,6 +16,7 @@
 #include <Eigen/Core>
 #include <igl/triangle/triangulate.h>
 #include <mapbox/earcut.hpp>
+#include "meshoptimizer.h"
 
 namespace Triangulation {
 
@@ -936,6 +937,51 @@ Indices ConstrainedDelaunayWithEdgeFlips(const std::vector<Vertex>& vertices) {
 
     triangleIndices = OptimizeByMinLengthFlips_PQ(vertices, triangleIndices);
     return triangleIndices;
+}
+
+void OptimizeWithMeshOptimizer(std::vector<Vertex>& vertices, Indices& indices) {
+    if (vertices.size() < 3 || indices.empty()) {
+        return;
+    }
+    
+    const size_t indexCount = indices.size();
+    const size_t vertexCount = vertices.size();
+    
+    // Extract vertex positions for overdraw optimizer (needs float3 positions)
+    std::vector<float> positions(vertexCount * 3);
+    for (size_t i = 0; i < vertexCount; ++i) {
+        positions[i * 3 + 0] = vertices[i].position.x;
+        positions[i * 3 + 1] = vertices[i].position.y;
+        positions[i * 3 + 2] = vertices[i].position.z;
+    }
+    
+    // Step 1: Vertex cache optimization - reorders triangles for better GPU vertex cache utilization
+    std::vector<unsigned int> optimizedIndices(indexCount);
+    meshopt_optimizeVertexCache(optimizedIndices.data(), indices.data(), indexCount, vertexCount);
+    
+    // Step 2: Overdraw optimization - reorders triangles to reduce overdraw
+    // threshold of 1.05 means up to 5% vertex cache degradation allowed for better overdraw
+    meshopt_optimizeOverdraw(optimizedIndices.data(), optimizedIndices.data(), indexCount,
+                             positions.data(), vertexCount, sizeof(float) * 3, 1.05f);
+    
+    // Step 3: Vertex fetch optimization - reorders vertices for better memory access patterns
+    // This requires both remapping indices AND reordering the vertex buffer
+    std::vector<unsigned int> remap(vertexCount);
+    size_t uniqueVertexCount = meshopt_optimizeVertexFetchRemap(remap.data(), optimizedIndices.data(), indexCount, vertexCount);
+    
+    // Remap indices to use the new vertex order
+    meshopt_remapIndexBuffer(optimizedIndices.data(), optimizedIndices.data(), indexCount, remap.data());
+    
+    // Reorder vertices according to the remap
+    std::vector<Vertex> reorderedVertices(uniqueVertexCount);
+    meshopt_remapVertexBuffer(reorderedVertices.data(), vertices.data(), vertexCount, sizeof(Vertex), remap.data());
+    
+    // Update the output
+    vertices = std::move(reorderedVertices);
+    indices.resize(indexCount);
+    for (size_t i = 0; i < indexCount; ++i) {
+        indices[i] = static_cast<uint32_t>(optimizedIndices[i]);
+    }
 }
 
 } // namespace Triangulation

@@ -32,4 +32,8 @@ Indices MinMaxArea(const std::vector<Vertex>& vertices, bool shouldHandleConcave
 Indices ConstrainedDelaunay(const std::vector<Vertex>& vertices);
 Indices ConstrainedDelaunayWithEdgeFlips(const std::vector<Vertex>& vertices);
 
+// MeshOptimizer: Applies vertex cache + overdraw + fetch optimization
+// Modifies both vertices (reorders for better fetch) and indices (reorders triangles for cache/overdraw)
+void OptimizeWithMeshOptimizer(std::vector<Vertex>& vertices, Indices& indices);
+
 } // namespace Triangulation
