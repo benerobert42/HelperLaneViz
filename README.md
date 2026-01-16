@@ -31,11 +31,10 @@ open HelperLaneViz.xcodeproj
 
 ### Initial Setup - Required User Action
 
-**Important**: The project includes a placeholder SVG path and will not run properly until that path points to an SVG file in your system. To make the project work:
-1. Load an SVG file via code (Recommended for quick testing)
-2. Open `HelperLaneViz/Rendering/Renderer.mm`
-3. Find line 49: `NSString *defaultSVGPath = @"Path to your SVG file";`
-4. Replace with your SVG file path:
+**Important**: The project includes a placeholder SVG path and will not run properly until that path points to an SVG file in your system. To make the project work load an SVG file via code first:
+1. Open `HelperLaneViz/Rendering/Renderer.mm`
+2. Find line 49: `NSString *defaultSVGPath = @"Path to your SVG file";`
+3. Replace with your SVG file path:
    ```objc
    NSString *defaultSVGPath = @"/path/to/your/file.svg";
    ```
