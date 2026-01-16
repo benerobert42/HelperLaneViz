@@ -52,6 +52,7 @@ uint64_t MakeCanonicalEdgeKey(uint32_t indexA, uint32_t indexB) {
 }
 
 // Computes edge-related metrics: unique edge count and total edge length.
+// Not used for the measurements, implementation in the Falcor project was used
 void ComputeEdgeMetrics(const std::vector<Vertex>& vertices,
                         const std::vector<uint32_t>& indices,
                         size_t& outUniqueEdgeCount,
