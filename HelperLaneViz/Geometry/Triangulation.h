@@ -1,10 +1,3 @@
-//
-//  Triangulation.h
-//  HelperLaneViz
-//
-//  Created by Robert Bene on 2025. 08. 21..
-//
-
 #pragma once
 
 #include "ShaderTypes.h"

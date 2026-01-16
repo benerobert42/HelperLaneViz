@@ -1,10 +1,3 @@
-//
-//  BinTriangles.metal
-//  HelperLaneViz
-//
-//  Created by Robert Bene on 2025. 11. 12..
-//
-
 #include "../ShaderTypes.h"
 
 #include <metal_stdlib>

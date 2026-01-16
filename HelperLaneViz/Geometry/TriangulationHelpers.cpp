@@ -1,10 +1,3 @@
-//
-//  TriangulationHelpers.cpp
-//  HelperLaneViz
-//
-//  Created by Robert Bene on 2025. 12. 14..
-//
-
 #include "TriangulationHelpers.h"
 
 double Triangulation::Helpers::Cross2D(const simd_float3& p0, const simd_float3& p1, const simd_float3& p2) {

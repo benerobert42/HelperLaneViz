@@ -1,10 +1,3 @@
-//
-//  TriangulationMetrics.cpp
-//  HelperLaneViz
-//
-//  Created by Robert Bene on 2025. 11. 08..
-//
-
 #include "TriangulationMetrics.h"
 #include "TileMetrics.h"
 

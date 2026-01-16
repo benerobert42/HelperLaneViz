@@ -1,10 +1,3 @@
-//
-//  Renderer.mm
-//  HelperLaneViz
-//
-//  Created by Robert Bene on 2025. 08. 16..
-//
-
 #import "Renderer.h"
 #import "GeometryManager.h"
 #import "MetricsComputer.h"
@@ -53,7 +46,7 @@
     _view.clearColor = MTLClearColorMake(0, 0, 0, 1);
     _view.depthStencilPixelFormat = MTLPixelFormatInvalid;
     
-    NSString *defaultSVGPath = @"/Users/robert.bene/Downloads/2052150.svg";
+    NSString *defaultSVGPath = @"Path to your SVG file";
     [self loadSVGFromPath:defaultSVGPath
       triangulationMethod:TriangulationMethodMinimumWeight
          instanceGridCols:5

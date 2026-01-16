@@ -1,10 +1,3 @@
-//
-//  ShaderTypes.h
-//  HelperLaneViz
-//
-//  Created by Robert Bene on 2025. 08. 16..
-//
-
 #ifndef AAPLShaderTypes_h
 #define AAPLShaderTypes_h
 

@@ -1,9 +1,3 @@
-//
-//  PipelineFactory.mm
-//  HelperLaneViz
-//
-//  Created by Robert Bene on 2025. 11. 08..
-//
 #import "PipelineFactory.h"
 
 // Common pipeline descriptor for view-based pipelines (no depth)

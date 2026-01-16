@@ -1,10 +1,3 @@
-//
-//  Triangulation.cpp
-//  HelperLaneViz
-//
-//  Created by Robert Bene on 2025. 08. 21..
-//
-
 #include "Triangulation.h"
 
 #include "TriangulationHelpers.h"

@@ -1,10 +1,3 @@
-//
-//  SVGLoader.cpp
-//  HelperLaneViz
-//
-//  Created by Robert Bene on 2025. 10. 11..
-//
-
 #include "SVGLoader.h"
 #include "../Geometry/Triangulation.h"
 

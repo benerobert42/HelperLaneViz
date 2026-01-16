@@ -1,10 +1,3 @@
-//
-//  GeometryFactory.m
-//  HelperLaneViz
-//
-//  Created by Robert Bene on 2025. 09. 23..
-//
-
 #include "GeometryFactory.h"
 
 #include <simd/simd.h>

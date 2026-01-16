@@ -1,10 +1,3 @@
-//
-//  GeometryManager1.h
-//  HelperLaneViz
-//
-//  Created by Robert Bene on 2025. 12. 15..
-//
-
 #pragma once
 
 #include <vector>

@@ -1,10 +1,3 @@
-//
-//  TileMetrics.h
-//  HelperLaneViz
-//
-//  Created by Robert Bene on 2025. 10. 23..
-//
-
 #pragma once
 #include <vector>
 #include <unordered_set>

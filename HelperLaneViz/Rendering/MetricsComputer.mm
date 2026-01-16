@@ -1,10 +1,3 @@
-//
-//  MetricsComputer.mm
-//  HelperLaneViz
-//
-//  Created by Robert Bene on 2025. 11. 08..
-//
-
 #import "MetricsComputer.h"
 #import "GeometryManager.h"
 #import "PipelineFactory.h"

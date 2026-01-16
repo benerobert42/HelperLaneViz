@@ -1,10 +1,3 @@
-//
-//  RenderingManager.mm
-//  HelperLaneViz
-//
-//  Created by Robert Bene on 2025. 11. 08..
-//
-
 #import "RenderingManager.h"
 #import "GeometryManager.h"
 #import "MetricsComputer.h"

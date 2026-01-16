@@ -1,10 +1,3 @@
-//
-//  GeometryManager.mm
-//  HelperLaneViz
-//
-//  Created by Robert Bene on 2025. 11. 08..
-//
-
 #import "GeometryManager.h"
 #import "MathUtilities.h"
 #import "../Geometry/GeometryFactory.h"

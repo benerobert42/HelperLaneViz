@@ -1,10 +1,3 @@
-//
-//  ViewController.m
-//  HelperLaneViz
-//
-//  Created by Robert Bene on 2025. 08. 16..
-//
-
 #import "MetalKit/MetalKit.h"
 #import "ViewController.h"
 #import "Renderer.h"

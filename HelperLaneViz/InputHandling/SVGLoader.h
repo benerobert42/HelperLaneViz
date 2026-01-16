@@ -1,10 +1,3 @@
-//
-//  SVGLoader.hpp
-//  HelperLaneViz
-//
-//  Created by Robert Bene on 2025. 10. 11..
-//
-
 #pragma once
 
 #include "ShaderTypes.h"

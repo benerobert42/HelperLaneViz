@@ -1,10 +1,3 @@
-//
-//  HelperLaneVizTests.m
-//  HelperLaneVizTests
-//
-//  Created by Robert Bene on 2025. 08. 16..
-//
-
 #import <XCTest/XCTest.h>
 
 @interface HelperLaneVizTests : XCTestCase

@@ -1,9 +1,3 @@
-//
-//  SceneShaders.metal
-//  HelperLaneViz
-//
-//  Created by Robert Bene on 2025. 11. 09..
-
 #include <metal_stdlib>
 using namespace metal;
 
