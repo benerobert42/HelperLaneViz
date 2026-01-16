@@ -517,7 +517,6 @@
 					"$(SRCROOT)/external/eigen",
 					"$(SRCROOT)/external/triangle",
 					"$(SRCROOT)/external/triangulator/include",
-					/opt/homebrew/include,
 					"$(SRCROOT)/external/imgui/**",
 					"$(SRCROOT)/external/earcut/include",
 					"$(SRCROOT)/external/meshoptimizer/src",
@@ -530,7 +529,6 @@
 					"@executable_path/../Frameworks",
 				);
 				LIBRARY_SEARCH_PATHS = (
-					/opt/homebrew/lib,
 					"$(PROJECT_DIR)/external/imgui/examples/libs/glfw/lib-vc2010-32",
 					"$(PROJECT_DIR)/external/imgui/examples/libs/glfw/lib-vc2010-64",
 				);
@@ -541,8 +539,6 @@
 					"-DANSI_DECLARATORS",
 				);
 				OTHER_LDFLAGS = (
-					"-lmpfr",
-					"-lgmp",
 				);
 				PRODUCT_BUNDLE_IDENTIFIER = Me.HelperLaneViz;
 				PRODUCT_NAME = "$(TARGET_NAME)";
@@ -568,7 +564,6 @@
 					"$(SRCROOT)/external/eigen",
 					"$(SRCROOT)/external/triangle",
 					"$(SRCROOT)/external/triangulator/include",
-					/opt/homebrew/include,
 					"$(SRCROOT)/external/imgui/**",
 					"$(SRCROOT)/external/earcut/include",
 					"$(SRCROOT)/external/meshoptimizer/src",
@@ -581,7 +576,6 @@
 					"@executable_path/../Frameworks",
 				);
 				LIBRARY_SEARCH_PATHS = (
-					/opt/homebrew/lib,
 					"$(PROJECT_DIR)/external/imgui/examples/libs/glfw/lib-vc2010-32",
 					"$(PROJECT_DIR)/external/imgui/examples/libs/glfw/lib-vc2010-64",
 				);
@@ -592,8 +586,6 @@
 					"-DANSI_DECLARATORS",
 				);
 				OTHER_LDFLAGS = (
-					"-lmpfr",
-					"-lgmp",
 				);
 				PRODUCT_BUNDLE_IDENTIFIER = Me.HelperLaneViz;
 				PRODUCT_NAME = "$(TARGET_NAME)";
